@@ -204,7 +204,8 @@ jobs:
             "-password=$env:SSLCOM_PASSWORD" `
             "-credential_id=$env:SSLCOM_CREDENTIAL_ID" `
             "-totp_secret=$env:SSLCOM_TOTP_SECRET" `
-            "-input_file_path=$env:GITHUB_WORKSPACE\build\Release\libera-lab.exe"
+            "-input_file_path=$env:GITHUB_WORKSPACE\build\Release\libera-lab.exe" `
+            "-override=true"
           Pop-Location
         env:
           SSLCOM_USERNAME: ${{ secrets.SSLCOM_USERNAME }}

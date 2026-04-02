@@ -69,12 +69,19 @@ add_executable(libera-lab
 
 # ---- macOS app bundle ----
 if (APPLE)
+    set(MACOSX_BUNDLE_ICON icons/libera-lab.icns)
+    set_source_files_properties(${CMAKE_CURRENT_SOURCE_DIR}/${MACOSX_BUNDLE_ICON} PROPERTIES
+        MACOSX_PACKAGE_LOCATION "Resources"
+    )
+    target_sources(libera-lab PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/${MACOSX_BUNDLE_ICON})
+
     set_target_properties(libera-lab PROPERTIES
         MACOSX_BUNDLE TRUE
         MACOSX_BUNDLE_BUNDLE_NAME "Libera Lab"
         MACOSX_BUNDLE_GUI_IDENTIFIER "com.sebleedelisle.libera-lab"
         MACOSX_BUNDLE_BUNDLE_VERSION "${PROJECT_VERSION}"
         MACOSX_BUNDLE_SHORT_VERSION_STRING "${PROJECT_VERSION}"
+        MACOSX_BUNDLE_ICON_FILE "libera-lab.icns"
         MACOSX_BUNDLE_INFO_PLIST "${CMAKE_CURRENT_SOURCE_DIR}/cmake/Info.plist.in"
     )
 
@@ -85,7 +92,12 @@ if (APPLE)
     )
     target_sources(libera-lab PRIVATE ${ILDA_PATTERNS})
 else()
-    # Non-macOS: copy patterns next to the executable
+    # Windows icon
+    if (WIN32)
+        target_sources(libera-lab PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/icons/libera-lab.rc)
+    endif()
+
+    # Copy patterns next to the executable
     file(GLOB ILDA_PATTERNS "${CMAKE_CURRENT_SOURCE_DIR}/patterns/*.ild")
     foreach(PATTERN_FILE ${ILDA_PATTERNS})
         get_filename_component(PATTERN_NAME ${PATTERN_FILE} NAME)

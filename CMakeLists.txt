@@ -1,5 +1,21 @@
 cmake_minimum_required(VERSION 3.15)
-project(libera-lab VERSION 0.1.0 LANGUAGES CXX)
+
+# Pull version from git tag (e.g. v0.3.3 → 0.3.3), fallback to 0.0.0
+execute_process(
+    COMMAND git describe --tags --abbrev=0
+    WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
+    OUTPUT_VARIABLE GIT_TAG
+    OUTPUT_STRIP_TRAILING_WHITESPACE
+    ERROR_QUIET
+    RESULT_VARIABLE GIT_TAG_RESULT
+)
+if(GIT_TAG_RESULT EQUAL 0 AND GIT_TAG MATCHES "^v?([0-9]+\\.[0-9]+\\.[0-9]+)")
+    set(PROJECT_VERSION_FROM_GIT "${CMAKE_MATCH_1}")
+else()
+    set(PROJECT_VERSION_FROM_GIT "0.0.0")
+endif()
+
+project(libera-lab VERSION ${PROJECT_VERSION_FROM_GIT} LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)

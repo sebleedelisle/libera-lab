@@ -103,6 +103,11 @@ jobs:
       - name: Package DMG (macOS)
         if: runner.os == 'macOS'
         run: |
+          # Rename app bundle to have a nice display name in the DMG
+          mv build/libera-lab.app "build/Libera Lab.app"
+
+          # create-dmg returns exit code 2 if it can't set Finder layout
+          # (common on CI runners without a GUI session) — the DMG is still valid
           create-dmg \
             --volname "Libera Lab" \
             --window-pos 200 120 \
@@ -112,7 +117,10 @@ jobs:
             --app-drop-link 450 190 \
             --no-internet-enable \
             "libera-lab-macos.dmg" \
-            "build/libera-lab.app"
+            "build/Libera Lab.app" || true
+
+          # Verify the DMG was created
+          test -f libera-lab-macos.dmg
 
           # Sign the DMG too
           codesign --force --sign "Developer ID Application: Seb Lee-Delisle (${{ secrets.APPLE_TEAM_ID }})" \

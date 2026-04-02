@@ -132,30 +132,37 @@ jobs:
         if: runner.os == 'Windows'
         shell: powershell
         run: |
-          Invoke-WebRequest -Uri "https://www.ssl.com/download/codesigntool-for-windows/" -OutFile "CodeSignTool.zip"
-          Expand-Archive -Path "CodeSignTool.zip" -DestinationPath "CodeSignTool" -Force
-          $cst = Get-ChildItem -Path "CodeSignTool" -Recurse -Filter "CodeSignTool.bat" | Select-Object -First 1
-          echo "CST_PATH=$($cst.FullName)" >> $env:GITHUB_ENV
+          # Download with redirect following
+          $url = "https://www.ssl.com/download/codesigntool-for-windows/"
+          $wc = New-Object System.Net.WebClient
+          $wc.DownloadFile($url, "CodeSignTool.zip")
 
-      - name: Test credentials (Windows)
-        if: runner.os == 'Windows'
-        timeout-minutes: 2
-        shell: cmd
-        run: |
-          "%CST_PATH%" credential_info ^
-            -username="%SSLCOM_USERNAME%" ^
-            -password="%SSLCOM_PASSWORD%" ^
-            -credential_id="%SSLCOM_CREDENTIAL_ID%"
-        env:
-          SSLCOM_USERNAME: ${{ secrets.SSLCOM_USERNAME }}
-          SSLCOM_PASSWORD: ${{ secrets.SSLCOM_PASSWORD }}
-          SSLCOM_CREDENTIAL_ID: ${{ secrets.SSLCOM_CREDENTIAL_ID }}
+          # If that didn't work (HTML page), try the known direct URL
+          $fileSize = (Get-Item "CodeSignTool.zip").Length
+          if ($fileSize -lt 1000000) {
+            Write-Host "First download attempt returned small file ($fileSize bytes), trying direct URL..."
+            Invoke-WebRequest -Uri "https://www.ssl.com/download/codesigntool-for-windows/" -OutFile "CodeSignTool.zip" -MaximumRedirection 10
+          }
+
+          Expand-Archive -Path "CodeSignTool.zip" -DestinationPath "CodeSignTool" -Force
+
+          # Find and report the bat file location
+          $cst = Get-ChildItem -Path "CodeSignTool" -Recurse -Filter "CodeSignTool.bat" | Select-Object -First 1
+          if ($cst) {
+            Write-Host "Found CodeSignTool at: $($cst.FullName)"
+            echo "CST_PATH=$($cst.FullName)" >> $env:GITHUB_ENV
+          } else {
+            Write-Host "CodeSignTool.bat not found! Contents of CodeSignTool directory:"
+            Get-ChildItem -Path "CodeSignTool" -Recurse | Select-Object FullName
+            exit 1
+          }
 
       - name: Sign executable (Windows)
         if: runner.os == 'Windows'
         timeout-minutes: 5
         shell: cmd
         run: |
+          echo Signing with CodeSignTool at: %CST_PATH%
           "%CST_PATH%" sign ^
             -username="%SSLCOM_USERNAME%" ^
             -password="%SSLCOM_PASSWORD%" ^

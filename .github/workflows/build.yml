@@ -70,9 +70,38 @@ jobs:
           security set-key-partition-list -S apple-tool:,apple: -k "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
           security list-keychains -d user -s "$KEYCHAIN_PATH" login.keychain-db
 
+      - name: Bundle libusb into app (macOS)
+        if: runner.os == 'macOS'
+        run: |
+          # Find where libusb is linked from
+          LIBUSB_PATH=$(otool -L build/libera-lab.app/Contents/MacOS/libera-lab | grep libusb | awk '{print $1}')
+          echo "Current libusb path: $LIBUSB_PATH"
+
+          # Copy libusb into the Frameworks folder inside the app bundle
+          mkdir -p build/libera-lab.app/Contents/Frameworks
+          cp "$(brew --prefix libusb)/lib/libusb-1.0.0.dylib" build/libera-lab.app/Contents/Frameworks/
+
+          # Rewrite the executable to look for libusb inside the bundle
+          install_name_tool -change "$LIBUSB_PATH" \
+            @executable_path/../Frameworks/libusb-1.0.0.dylib \
+            build/libera-lab.app/Contents/MacOS/libera-lab
+
+          # Fix the dylib's own ID
+          install_name_tool -id @executable_path/../Frameworks/libusb-1.0.0.dylib \
+            build/libera-lab.app/Contents/Frameworks/libusb-1.0.0.dylib
+
+          # Verify
+          echo "Updated library paths:"
+          otool -L build/libera-lab.app/Contents/MacOS/libera-lab | grep libusb
+
       - name: Sign app bundle
         if: runner.os == 'macOS'
         run: |
+          # Sign the bundled dylib first, then the app
+          codesign --force --options runtime \
+            --sign "Developer ID Application: Seb Lee-Delisle (${{ secrets.APPLE_TEAM_ID }})" \
+            build/libera-lab.app/Contents/Frameworks/libusb-1.0.0.dylib
+
           codesign --deep --force --options runtime \
             --sign "Developer ID Application: Seb Lee-Delisle (${{ secrets.APPLE_TEAM_ID }})" \
             build/libera-lab.app

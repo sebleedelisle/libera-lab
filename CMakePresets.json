@@ -1,0 +1,52 @@
+{
+  "version": 6,
+  "cmakeMinimumRequired": { "major": 3, "minor": 15, "patch": 0 },
+  "configurePresets": [
+    {
+      "name": "release",
+      "displayName": "Release (Ninja)",
+      "generator": "Ninja",
+      "binaryDir": "${sourceDir}/build",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Release",
+        "LIBERA_BUILD_TESTS": "OFF",
+        "LIBERA_BUILD_EXAMPLES": "OFF"
+      }
+    },
+    {
+      "name": "debug",
+      "displayName": "Debug (Ninja)",
+      "generator": "Ninja",
+      "binaryDir": "${sourceDir}/build",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Debug",
+        "LIBERA_BUILD_TESTS": "OFF",
+        "LIBERA_BUILD_EXAMPLES": "OFF"
+      }
+    },
+    {
+      "name": "win-release",
+      "displayName": "Release (Visual Studio)",
+      "generator": "Visual Studio 17 2022",
+      "binaryDir": "${sourceDir}/build",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Release",
+        "LIBERA_BUILD_TESTS": "OFF",
+        "LIBERA_BUILD_EXAMPLES": "OFF",
+        "LIBERA_USE_BUNDLED_LIBUSB": "ON"
+      }
+    },
+    {
+      "name": "win-debug",
+      "displayName": "Debug (Visual Studio)",
+      "generator": "Visual Studio 17 2022",
+      "binaryDir": "${sourceDir}/build",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Debug",
+        "LIBERA_BUILD_TESTS": "OFF",
+        "LIBERA_BUILD_EXAMPLES": "OFF",
+        "LIBERA_USE_BUNDLED_LIBUSB": "ON"
+      }
+    }
+  ]
+}

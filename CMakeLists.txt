@@ -5,9 +5,8 @@ set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
-# ---- libera-core (from sibling directory) ----
-add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/../libera-core
-                 ${CMAKE_CURRENT_BINARY_DIR}/libera-core)
+# ---- libera-core (submodule) ----
+add_subdirectory(libs/libera-core)
 
 # ---- GLFW (windowing) ----
 include(FetchContent)

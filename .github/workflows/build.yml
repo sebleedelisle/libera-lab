@@ -209,7 +209,21 @@ jobs:
             "-totp_secret=$env:SSLCOM_TOTP_SECRET" `
             "-input_file_path=$env:GITHUB_WORKSPACE\build\Release\libera-lab.exe" `
             "-override=true"
+          $exitCode = $LASTEXITCODE
           Pop-Location
+
+          if ($exitCode -ne 0) {
+            Write-Error "Code signing failed with exit code $exitCode"
+            exit 1
+          }
+
+          # Verify the signature was applied
+          $sig = Get-AuthenticodeSignature "build\Release\libera-lab.exe"
+          if ($sig.Status -ne "Valid") {
+            Write-Error "Signature verification failed: $($sig.Status)"
+            exit 1
+          }
+          Write-Host "Signature verified: $($sig.SignerCertificate.Subject)"
         env:
           SSLCOM_USERNAME: ${{ secrets.SSLCOM_USERNAME }}
           SSLCOM_PASSWORD: ${{ secrets.SSLCOM_PASSWORD }}

@@ -33,7 +33,7 @@ jobs:
 
       - name: Install dependencies (macOS)
         if: runner.os == 'macOS'
-        run: brew install libusb ninja create-dmg 2>/dev/null
+        run: brew install ninja create-dmg 2>/dev/null
 
       - name: Configure (macOS)
         if: runner.os == 'macOS'
@@ -80,9 +80,9 @@ jobs:
           LIBUSB_PATH=$(otool -L build/libera-lab.app/Contents/MacOS/libera-lab | grep libusb | awk '{print $1}')
           echo "Current libusb path: $LIBUSB_PATH"
 
-          # Copy libusb into the Frameworks folder inside the app bundle
+          # Copy bundled universal libusb into the Frameworks folder
           mkdir -p build/libera-lab.app/Contents/Frameworks
-          cp "$(brew --prefix libusb)/lib/libusb-1.0.0.dylib" build/libera-lab.app/Contents/Frameworks/
+          cp libs/libera-core/libs/helios_dac/sdk/cpp/libusb_bin/macOS/libusb-1.0.0.dylib build/libera-lab.app/Contents/Frameworks/
 
           # Rewrite the executable to look for libusb inside the bundle
           install_name_tool -change "$LIBUSB_PATH" \

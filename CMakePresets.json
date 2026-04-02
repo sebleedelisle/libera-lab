@@ -9,6 +9,9 @@
       "binaryDir": "${sourceDir}/build",
       "cacheVariables": {
         "CMAKE_BUILD_TYPE": "Release",
+        "CMAKE_OSX_ARCHITECTURES": "arm64;x86_64",
+        "CMAKE_OSX_DEPLOYMENT_TARGET": "12.0",
+        "LIBERA_USE_BUNDLED_LIBUSB": "ON",
         "LIBERA_BUILD_TESTS": "OFF",
         "LIBERA_BUILD_EXAMPLES": "OFF"
       }
@@ -20,6 +23,9 @@
       "binaryDir": "${sourceDir}/build",
       "cacheVariables": {
         "CMAKE_BUILD_TYPE": "Debug",
+        "CMAKE_OSX_ARCHITECTURES": "arm64;x86_64",
+        "CMAKE_OSX_DEPLOYMENT_TARGET": "12.0",
+        "LIBERA_USE_BUNDLED_LIBUSB": "ON",
         "LIBERA_BUILD_TESTS": "OFF",
         "LIBERA_BUILD_EXAMPLES": "OFF"
       }

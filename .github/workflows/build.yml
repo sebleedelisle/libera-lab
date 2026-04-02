@@ -160,15 +160,23 @@ jobs:
       - name: Sign executable (Windows)
         if: runner.os == 'Windows'
         timeout-minutes: 5
-        shell: cmd
+        shell: powershell
         run: |
-          echo Signing with CodeSignTool at: %CST_PATH%
-          "%CST_PATH%" sign ^
-            -username="%SSLCOM_USERNAME%" ^
-            -password="%SSLCOM_PASSWORD%" ^
-            -credential_id="%SSLCOM_CREDENTIAL_ID%" ^
-            -totp_secret="%SSLCOM_TOTP_SECRET%" ^
-            -input_file_path="build\Release\libera-lab.exe"
+          Write-Host "CodeSignTool path: $env:CST_PATH"
+          $cstDir = Split-Path $env:CST_PATH
+          Write-Host "CodeSignTool directory contents:"
+          Get-ChildItem $cstDir | ForEach-Object { Write-Host "  $_" }
+          Write-Host "Input file exists: $(Test-Path 'build\Release\libera-lab.exe')"
+
+          # Run from the CodeSignTool directory so it can find its jre
+          Push-Location $cstDir
+          & .\CodeSignTool.bat sign `
+            "-username=$env:SSLCOM_USERNAME" `
+            "-password=$env:SSLCOM_PASSWORD" `
+            "-credential_id=$env:SSLCOM_CREDENTIAL_ID" `
+            "-totp_secret=$env:SSLCOM_TOTP_SECRET" `
+            "-input_file_path=$env:GITHUB_WORKSPACE\build\Release\libera-lab.exe"
+          Pop-Location
         env:
           SSLCOM_USERNAME: ${{ secrets.SSLCOM_USERNAME }}
           SSLCOM_PASSWORD: ${{ secrets.SSLCOM_PASSWORD }}

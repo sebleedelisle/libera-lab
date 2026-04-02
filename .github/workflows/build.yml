@@ -128,29 +128,45 @@ jobs:
 
       # ---- Windows code signing & packaging ----
 
-      - name: Test SSL.com credentials (Windows)
+      - name: Install CodeSignTool (Windows)
         if: runner.os == 'Windows'
-        uses: sslcom/esigner-codesign@v1.3.2
-        with:
-          command: credential_info
-          username: ${{ secrets.SSLCOM_USERNAME }}
-          password: ${{ secrets.SSLCOM_PASSWORD }}
-          credential_id: ${{ secrets.SSLCOM_CREDENTIAL_ID }}
-          totp_secret: ${{ secrets.SSLCOM_TOTP_SECRET }}
-          environment_name: PROD
+        shell: powershell
+        run: |
+          Invoke-WebRequest -Uri "https://www.ssl.com/download/codesigntool-for-windows/" -OutFile "CodeSignTool.zip"
+          Expand-Archive -Path "CodeSignTool.zip" -DestinationPath "CodeSignTool" -Force
+          $cst = Get-ChildItem -Path "CodeSignTool" -Recurse -Filter "CodeSignTool.bat" | Select-Object -First 1
+          echo "CST_PATH=$($cst.FullName)" >> $env:GITHUB_ENV
+
+      - name: Test credentials (Windows)
+        if: runner.os == 'Windows'
+        timeout-minutes: 2
+        shell: cmd
+        run: |
+          "%CST_PATH%" credential_info ^
+            -username="%SSLCOM_USERNAME%" ^
+            -password="%SSLCOM_PASSWORD%" ^
+            -credential_id="%SSLCOM_CREDENTIAL_ID%"
+        env:
+          SSLCOM_USERNAME: ${{ secrets.SSLCOM_USERNAME }}
+          SSLCOM_PASSWORD: ${{ secrets.SSLCOM_PASSWORD }}
+          SSLCOM_CREDENTIAL_ID: ${{ secrets.SSLCOM_CREDENTIAL_ID }}
 
       - name: Sign executable (Windows)
         if: runner.os == 'Windows'
         timeout-minutes: 5
-        uses: sslcom/esigner-codesign@v1.3.2
-        with:
-          command: sign
-          username: ${{ secrets.SSLCOM_USERNAME }}
-          password: ${{ secrets.SSLCOM_PASSWORD }}
-          credential_id: ${{ secrets.SSLCOM_CREDENTIAL_ID }}
-          totp_secret: ${{ secrets.SSLCOM_TOTP_SECRET }}
-          file_path: build/Release/libera-lab.exe
-          environment_name: PROD
+        shell: cmd
+        run: |
+          "%CST_PATH%" sign ^
+            -username="%SSLCOM_USERNAME%" ^
+            -password="%SSLCOM_PASSWORD%" ^
+            -credential_id="%SSLCOM_CREDENTIAL_ID%" ^
+            -totp_secret="%SSLCOM_TOTP_SECRET%" ^
+            -input_file_path="build\Release\libera-lab.exe"
+        env:
+          SSLCOM_USERNAME: ${{ secrets.SSLCOM_USERNAME }}
+          SSLCOM_PASSWORD: ${{ secrets.SSLCOM_PASSWORD }}
+          SSLCOM_CREDENTIAL_ID: ${{ secrets.SSLCOM_CREDENTIAL_ID }}
+          SSLCOM_TOTP_SECRET: ${{ secrets.SSLCOM_TOTP_SECRET }}
 
       - name: Package (Windows)
         if: runner.os == 'Windows'

@@ -30,7 +30,7 @@ jobs:
 
       - name: Install dependencies (macOS)
         if: runner.os == 'macOS'
-        run: brew install libusb ninja
+        run: brew install libusb ninja create-dmg
 
       - name: Configure (macOS)
         if: runner.os == 'macOS'
@@ -43,13 +43,19 @@ jobs:
       - name: Build
         run: cmake --build build --config Release
 
-      - name: Package (macOS)
+      - name: Package DMG (macOS)
         if: runner.os == 'macOS'
         run: |
-          mkdir -p staging/libera-lab
-          cp build/libera-lab staging/libera-lab/
-          cp -r build/patterns staging/libera-lab/
-          cd staging && zip -r ../libera-lab-macos.zip libera-lab
+          create-dmg \
+            --volname "Libera Lab" \
+            --window-pos 200 120 \
+            --window-size 600 400 \
+            --icon-size 100 \
+            --icon "Libera Lab.app" 150 190 \
+            --app-drop-link 450 190 \
+            --no-internet-enable \
+            "libera-lab-macos.dmg" \
+            "build/libera-lab.app"
 
       - name: Package (Windows)
         if: runner.os == 'Windows'
@@ -66,7 +72,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: ${{ matrix.artifact }}
-          path: ${{ matrix.artifact }}.zip
+          path: ${{ matrix.artifact }}.${{ runner.os == 'macOS' && 'dmg' || 'zip' }}
 
   release:
     if: startsWith(github.ref, 'refs/tags/v')
@@ -83,6 +89,6 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           files: |
-            libera-lab-macos/libera-lab-macos.zip
+            libera-lab-macos/libera-lab-macos.dmg
             libera-lab-windows/libera-lab-windows.zip
           generate_release_notes: true

@@ -518,10 +518,21 @@ static core::Frame makeShapeFrame(int patternIndex, float r, float g, float b,
 // ---------------------------------------------------------------------------
 
 static std::string getPatternsDir(const char* argv0) {
-    // Look for patterns/ next to the executable
+#ifdef __APPLE__
+    // Inside an app bundle: look in Contents/Resources/patterns
     std::string exePath(argv0);
-    auto lastSlash = exePath.find_last_of("/\\");
-    std::string dir = (lastSlash != std::string::npos) ? exePath.substr(0, lastSlash) : ".";
+    auto lastSlash = exePath.find_last_of('/');
+    std::string macosDir = (lastSlash != std::string::npos) ? exePath.substr(0, lastSlash) : ".";
+    std::string resourceDir = macosDir + "/../Resources/patterns";
+    // Fall back to next-to-executable for non-bundle builds
+    struct stat st;
+    if (stat(resourceDir.c_str(), &st) == 0 && S_ISDIR(st.st_mode))
+        return resourceDir;
+#endif
+    // Default: patterns/ next to the executable
+    std::string exePath2(argv0);
+    auto lastSlash2 = exePath2.find_last_of("/\\");
+    std::string dir = (lastSlash2 != std::string::npos) ? exePath2.substr(0, lastSlash2) : ".";
     return dir + "/patterns";
 }
 

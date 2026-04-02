@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.15)
-project(libera-lab LANGUAGES CXX)
+project(libera-lab VERSION 0.1.0 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -67,13 +67,32 @@ add_executable(libera-lab
     ${CMAKE_CURRENT_SOURCE_DIR}/fonts/ForkAwesome.cpp
 )
 
-# Copy patterns folder next to the executable
-file(GLOB ILDA_PATTERNS "${CMAKE_CURRENT_SOURCE_DIR}/patterns/*.ild")
-foreach(PATTERN_FILE ${ILDA_PATTERNS})
-    get_filename_component(PATTERN_NAME ${PATTERN_FILE} NAME)
-    configure_file(${PATTERN_FILE}
-        ${CMAKE_CURRENT_BINARY_DIR}/patterns/${PATTERN_NAME} COPYONLY)
-endforeach()
+# ---- macOS app bundle ----
+if (APPLE)
+    set_target_properties(libera-lab PROPERTIES
+        MACOSX_BUNDLE TRUE
+        MACOSX_BUNDLE_BUNDLE_NAME "Libera Lab"
+        MACOSX_BUNDLE_GUI_IDENTIFIER "com.sebleedelisle.libera-lab"
+        MACOSX_BUNDLE_BUNDLE_VERSION "${PROJECT_VERSION}"
+        MACOSX_BUNDLE_SHORT_VERSION_STRING "${PROJECT_VERSION}"
+        MACOSX_BUNDLE_INFO_PLIST "${CMAKE_CURRENT_SOURCE_DIR}/cmake/Info.plist.in"
+    )
+
+    # Copy patterns into the app bundle Resources folder
+    file(GLOB ILDA_PATTERNS "${CMAKE_CURRENT_SOURCE_DIR}/patterns/*.ild")
+    set_source_files_properties(${ILDA_PATTERNS} PROPERTIES
+        MACOSX_PACKAGE_LOCATION "Resources/patterns"
+    )
+    target_sources(libera-lab PRIVATE ${ILDA_PATTERNS})
+else()
+    # Non-macOS: copy patterns next to the executable
+    file(GLOB ILDA_PATTERNS "${CMAKE_CURRENT_SOURCE_DIR}/patterns/*.ild")
+    foreach(PATTERN_FILE ${ILDA_PATTERNS})
+        get_filename_component(PATTERN_NAME ${PATTERN_FILE} NAME)
+        configure_file(${PATTERN_FILE}
+            ${CMAKE_CURRENT_BINARY_DIR}/patterns/${PATTERN_NAME} COPYONLY)
+    endforeach()
+endif()
 
 target_include_directories(libera-lab PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 target_link_libraries(libera-lab PRIVATE libera-core imgui_lib)

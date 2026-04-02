@@ -253,3 +253,43 @@ jobs:
             libera-lab-macos/libera-lab-macos.dmg
             libera-lab-windows/libera-lab-windows.zip
           generate_release_notes: true
+
+      - name: Update public downloads page
+        env:
+          RELEASES_PAT: ${{ secrets.RELEASES_PAT }}
+        run: |
+          VERSION=${GITHUB_REF#refs/tags/}
+          DATE=$(date -u +"%Y-%m-%d")
+          RELEASE_URL="https://github.com/sebleedelisle/libera-lab/releases/download/${VERSION}"
+
+          # Clone the releases repo
+          git clone https://x-access-token:${RELEASES_PAT}@github.com/sebleedelisle/libera-lab-releases.git releases-repo
+          cd releases-repo
+
+          # Copy the artifacts into public/downloads/<version>/
+          mkdir -p "public/downloads/${VERSION}"
+          cp ../libera-lab-macos/libera-lab-macos.dmg "public/downloads/${VERSION}/" || true
+          cp ../libera-lab-windows/libera-lab-windows.zip "public/downloads/${VERSION}/" || true
+
+          # Update releases.json — prepend the new release
+          python3 -c "
+          import json
+          with open('public/releases.json') as f:
+              releases = json.load(f)
+          new = {
+              'version': '${VERSION}',
+              'date': '${DATE}',
+              'macos': 'downloads/${VERSION}/libera-lab-macos.dmg',
+              'windows': 'downloads/${VERSION}/libera-lab-windows.zip'
+          }
+          releases = [r for r in releases if r['version'] != '${VERSION}']
+          releases.insert(0, new)
+          with open('public/releases.json', 'w') as f:
+              json.dump(releases, f, indent=2)
+          "
+
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "Release ${VERSION}" || echo "No changes to commit"
+          git push

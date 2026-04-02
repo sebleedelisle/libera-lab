@@ -128,31 +128,16 @@ jobs:
 
       # ---- Windows code signing & packaging ----
 
-      - name: Install CodeSignTool (Windows)
-        if: runner.os == 'Windows'
-        shell: bash
-        run: |
-          curl -sL https://www.ssl.com/download/codesigntool-for-windows/ -o CodeSignTool.zip
-          unzip -o CodeSignTool.zip -d CodeSignTool
-          # Find the actual directory (may be nested)
-          CST_DIR=$(find CodeSignTool -name "CodeSignTool.bat" -printf '%h' -quit 2>/dev/null || find CodeSignTool -name "CodeSignTool.bat" | head -1 | xargs dirname)
-          echo "CST_DIR=$CST_DIR" >> $GITHUB_ENV
-
       - name: Sign executable (Windows)
         if: runner.os == 'Windows'
-        shell: bash
-        env:
-          SSLCOM_USERNAME: ${{ secrets.SSLCOM_USERNAME }}
-          SSLCOM_PASSWORD: ${{ secrets.SSLCOM_PASSWORD }}
-          SSLCOM_TOTP_SECRET: ${{ secrets.SSLCOM_TOTP_SECRET }}
-          SSLCOM_CREDENTIAL_ID: ${{ secrets.SSLCOM_CREDENTIAL_ID }}
-        run: |
-          "$CST_DIR/CodeSignTool.bat" sign \
-            -input_file_path="$(pwd)/build/Release/libera-lab.exe" \
-            -username="$SSLCOM_USERNAME" \
-            -password="$SSLCOM_PASSWORD" \
-            -totp_secret="$SSLCOM_TOTP_SECRET" \
-            -credential_id="$SSLCOM_CREDENTIAL_ID"
+        uses: sslcom/esigner-codesign@develop
+        with:
+          command: sign
+          username: ${{ secrets.SSLCOM_USERNAME }}
+          password: ${{ secrets.SSLCOM_PASSWORD }}
+          credential_id: ${{ secrets.SSLCOM_CREDENTIAL_ID }}
+          totp_secret: ${{ secrets.SSLCOM_TOTP_SECRET }}
+          file_path: build/Release/libera-lab.exe
 
       - name: Package (Windows)
         if: runner.os == 'Windows'

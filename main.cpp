@@ -67,7 +67,7 @@ static constexpr float MAX_SCAN_ANGLE = 60.0f;
 
 static constexpr int NUM_PATTERNS = 4;
 static const char* patternNames[NUM_PATTERNS] = {
-    "White Square", "White Circle", "RGBW Square", "Hot Corners"
+    "White Square", "White Circle", "Orientation", "Hot Corners"
 };
 
 enum class OutputMode { Shape, Point, Pattern };
@@ -314,7 +314,7 @@ static void applyTransform(float& x, float& y, const AppState& state) {
 // Frame generation
 // ---------------------------------------------------------------------------
 
-static core::Frame makeSquareFrame(float r, float g, float b, float size, float cx, float cy) {
+static core::Frame makeSquareFrame(float size, float cx, float cy) {
     core::Frame frame;
     const float s = size * 0.8f;
     constexpr int pointsPerSide = 100;
@@ -329,7 +329,7 @@ static core::Frame makeSquareFrame(float r, float g, float b, float size, float 
             float t = static_cast<float>(i) / static_cast<float>(pointsPerSide);
             float x = corners[side][0] + t * (corners[next][0] - corners[side][0]);
             float y = corners[side][1] + t * (corners[next][1] - corners[side][1]);
-            frame.points.push_back({x, y, r, g, b});
+            frame.points.push_back({x, y, 1, 1, 1});
         }
     }
     // Close the loop
@@ -337,7 +337,7 @@ static core::Frame makeSquareFrame(float r, float g, float b, float size, float 
     return frame;
 }
 
-static core::Frame makeCircleFrame(float r, float g, float b, float size, float cx, float cy) {
+static core::Frame makeCircleFrame(float size, float cx, float cy) {
     core::Frame frame;
     const float radius = size * 0.8f;
     constexpr int pointCount = 400;
@@ -348,14 +348,14 @@ static core::Frame makeCircleFrame(float r, float g, float b, float size, float 
         frame.points.push_back({
             cx + radius * std::cos(angle),
             cy + radius * std::sin(angle),
-            r, g, b
+            1, 1, 1
         });
     }
     return frame;
 }
 
 // RGBW Square: white top, red left, green bottom, blue right
-static core::Frame makeRGBWSquareFrame(float r, float g, float b, float size, float cx, float cy) {
+static core::Frame makeRGBWSquareFrame(float size, float cx, float cy) {
     core::Frame frame;
     const float s = size * 0.8f;
     constexpr int pointsPerSide = 100;
@@ -371,10 +371,10 @@ static core::Frame makeRGBWSquareFrame(float r, float g, float b, float size, fl
     // Clockwise from top: WHITE, RED, GREEN, BLUE
     struct SideCol { float r, g, b; };
     const SideCol sideCols[] = {
-        {0, g, 0},   // side 0 (bottom): green
-        {r, 0, 0},   // side 1 (right): red
-        {r, r, r},   // side 2 (top): white
-        {0, 0, b},   // side 3 (left): blue
+        {0, 1, 0},   // side 0 (bottom): green
+        {1, 0, 0},   // side 1 (right): red
+        {1, 1, 1},   // side 2 (top): white
+        {0, 0, 1},   // side 3 (left): blue
     };
 
     for (int side = 0; side < 4; ++side) {
@@ -391,7 +391,7 @@ static core::Frame makeRGBWSquareFrame(float r, float g, float b, float size, fl
 }
 
 // Hot Corners Square: fast along edges, lingers at corners
-static core::Frame makeHotCornersFrame(float r, float g, float b, float size, float cx, float cy) {
+static core::Frame makeHotCornersFrame(float size, float cx, float cy) {
     core::Frame frame;
     const float s = size * 0.8f;
     constexpr int cornerDwell = 30;   // points dwelling at each corner
@@ -408,14 +408,14 @@ static core::Frame makeHotCornersFrame(float r, float g, float b, float size, fl
         int next = (side + 1) % 4;
         // Dwell at this corner
         for (int i = 0; i < cornerDwell; ++i) {
-            frame.points.push_back({corners[side][0], corners[side][1], r, g, b});
+            frame.points.push_back({corners[side][0], corners[side][1], 1, 1, 1});
         }
         // Move quickly along edge
         for (int i = 0; i < edgePoints; ++i) {
             float t = static_cast<float>(i + 1) / static_cast<float>(edgePoints);
             float x = corners[side][0] + t * (corners[next][0] - corners[side][0]);
             float y = corners[side][1] + t * (corners[next][1] - corners[side][1]);
-            frame.points.push_back({x, y, r, g, b});
+            frame.points.push_back({x, y, 1, 1, 1});
         }
     }
     // Already closes: last edge ends at corner 0 = first dwell point
@@ -466,7 +466,7 @@ static std::vector<std::pair<float,float>> getPointPositions(int patternIndex, f
     return pts;
 }
 
-static core::Frame makePointFrame(int patternIndex, float r, float g, float b,
+static core::Frame makePointFrame(int patternIndex,
                                    float cx, float cy, float size, float dutyCycle) {
     core::Frame frame;
     auto positions = getPointPositions(patternIndex, cx, cy, size);
@@ -482,7 +482,7 @@ static core::Frame makePointFrame(int patternIndex, float r, float g, float b,
         // Dwell on this dot (with duty cycle)
         for (int i = 0; i < dwellPerDot; ++i) {
             if (i < onPoints) {
-                frame.points.push_back({px, py, r, g, b});
+                frame.points.push_back({px, py, 1, 1, 1});
             } else {
                 frame.points.push_back({px, py, 0, 0, 0});
             }
@@ -502,15 +502,14 @@ static core::Frame makePointFrame(int patternIndex, float r, float g, float b,
     return frame;
 }
 
-static core::Frame makeShapeFrame(int patternIndex, float r, float g, float b,
-                                   float size, float cx, float cy) {
+static core::Frame makeShapeFrame(int patternIndex, float size, float cx, float cy) {
     switch (patternIndex) {
-        case 0: return makeSquareFrame(r, g, b, size, cx, cy);
-        case 1: return makeCircleFrame(r, g, b, size, cx, cy);
-        case 2: return makeRGBWSquareFrame(r, g, b, size, cx, cy);
-        case 3: return makeHotCornersFrame(r, g, b, size, cx, cy);
+        case 0: return makeSquareFrame(size, cx, cy);
+        case 1: return makeCircleFrame(size, cx, cy);
+        case 2: return makeRGBWSquareFrame(size, cx, cy);
+        case 3: return makeHotCornersFrame(size, cx, cy);
     }
-    return makeSquareFrame(r, g, b, size, cx, cy);
+    return makeSquareFrame(size, cx, cy);
 }
 
 // ---------------------------------------------------------------------------
@@ -584,7 +583,6 @@ static void loadILDAPatterns(AppState& state, const std::string& dir) {
 
 // Convert ILDA points to a libera Frame, applying brightness/RGB and size/offset
 static core::Frame makeILDAFrame(const std::vector<ILDAPoint>& ildaPoints,
-                                  float r, float g, float b,
                                   float size, float cx, float cy) {
     core::Frame frame;
     frame.points.reserve(ildaPoints.size());
@@ -597,11 +595,10 @@ static core::Frame makeILDAFrame(const std::vector<ILDAPoint>& ildaPoints,
         if (ip.blank) {
             frame.points.push_back({nx, ny, 0, 0, 0});
         } else {
-            // Extract ILDA colour and multiply by user RGB/brightness
             float ir = static_cast<float>((ip.color >> 16) & 0xFF) / 255.0f;
             float ig = static_cast<float>((ip.color >> 8) & 0xFF) / 255.0f;
             float ib = static_cast<float>(ip.color & 0xFF) / 255.0f;
-            frame.points.push_back({nx, ny, ir * r, ig * g, ib * b});
+            frame.points.push_back({nx, ny, ir, ig, ib});
         }
     }
     return frame;
@@ -617,7 +614,7 @@ static void drawPatternInRect(ImDrawList* drawList, int patternIndex,
                                ImVec2 rectPos, ImVec2 rectSize,
                                float brightnessScale = 1.0f,
                                bool flipYForPreview = false) {
-    core::Frame frame = makeShapeFrame(patternIndex, 1.0f, 1.0f, 1.0f, size, cx, cy);
+    core::Frame frame = makeShapeFrame(patternIndex, size, cx, cy);
 
     auto mapX = [&](float x) { return rectPos.x + (x + 1.0f) * 0.5f * rectSize.x; };
     auto mapY = [&](float y) {
@@ -942,21 +939,33 @@ static void pollAsyncConnections(AppState& state) {
 // ---------------------------------------------------------------------------
 
 static core::Frame buildCurrentFrame(const AppState& state) {
-    float r, g, b;
-    state.effectiveRGB(r, g, b);
     float sz = state.outputSize / 100.0f;
     float cx = state.outputX / 100.0f;
     float cy = state.outputY / 100.0f;
 
+    core::Frame frame;
     if (state.outputMode == 1) {
-        return makePointFrame(state.pointPatternIndex, r, g, b, cx, cy, sz, state.dutyCycle);
+        frame = makePointFrame(state.pointPatternIndex, cx, cy, sz, state.dutyCycle);
     } else if (state.outputMode == 2) {
         int idx = state.selectedIldaPattern;
         if (idx >= 0 && idx < static_cast<int>(state.ildaPatterns.size()))
-            return makeILDAFrame(state.ildaPatterns[idx].points, r, g, b, sz * 0.8f, cx, cy);
-        return makeShapeFrame(0, r, g, b, sz, cx, cy); // fallback
+            frame = makeILDAFrame(state.ildaPatterns[idx].points, sz * 0.8f, cx, cy);
+        else
+            frame = makeShapeFrame(0, sz, cx, cy); // fallback
+    } else {
+        frame = makeShapeFrame(state.patternIndex, sz, cx, cy);
     }
-    return makeShapeFrame(state.patternIndex, r, g, b, sz, cx, cy);
+
+    // Apply brightness and RGB as post-processing
+    float r, g, b;
+    state.effectiveRGB(r, g, b);
+    for (auto& pt : frame.points) {
+        pt.r *= r;
+        pt.g *= g;
+        pt.b *= b;
+    }
+
+    return frame;
 }
 
 // ---------------------------------------------------------------------------

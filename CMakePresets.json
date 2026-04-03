@@ -31,6 +31,17 @@
       }
     },
     {
+      "name": "linux-release",
+      "displayName": "Release (Ninja, Linux)",
+      "generator": "Ninja",
+      "binaryDir": "${sourceDir}/build",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Release",
+        "LIBERA_BUILD_TESTS": "OFF",
+        "LIBERA_BUILD_EXAMPLES": "OFF"
+      }
+    },
+    {
       "name": "win-release",
       "displayName": "Release (Visual Studio)",
       "generator": "Visual Studio 17 2022",

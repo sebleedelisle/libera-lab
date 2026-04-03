@@ -19,6 +19,9 @@ jobs:
           - os: macos-latest
             preset: release
             artifact: libera-lab-macos
+          - os: ubuntu-latest
+            preset: linux-release
+            artifact: libera-lab-linux
           - os: windows-latest
             preset: win-release
             artifact: libera-lab-windows
@@ -35,12 +38,15 @@ jobs:
         if: runner.os == 'macOS'
         run: brew install ninja create-dmg 2>/dev/null
 
-      - name: Configure (macOS)
-        if: runner.os == 'macOS'
-        run: cmake --preset ${{ matrix.preset }}
+      - name: Install dependencies (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ninja-build libusb-1.0-0-dev \
+            libgl-dev libx11-dev libxrandr-dev libxinerama-dev \
+            libxcursor-dev libxi-dev libxkbcommon-dev
 
-      - name: Configure (Windows)
-        if: runner.os == 'Windows'
+      - name: Configure
         run: cmake --preset ${{ matrix.preset }}
 
       - name: Build
@@ -176,6 +182,14 @@ jobs:
           timestamp-rfc3161: http://timestamp.acs.microsoft.com
           timestamp-digest: SHA256
 
+      - name: Package (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          mkdir -p staging/libera-lab
+          cp build/libera-lab staging/libera-lab/
+          cp -r build/patterns staging/libera-lab/ || true
+          tar -czf libera-lab-linux.tar.gz -C staging libera-lab
+
       - name: Package (Windows)
         if: runner.os == 'Windows'
         shell: bash
@@ -191,7 +205,10 @@ jobs:
         uses: actions/upload-artifact@v5
         with:
           name: ${{ matrix.artifact }}
-          path: ${{ matrix.artifact }}.${{ runner.os == 'macOS' && 'dmg' || 'zip' }}
+          path: |
+            ${{ matrix.artifact }}.dmg
+            ${{ matrix.artifact }}.zip
+            ${{ matrix.artifact }}.tar.gz
 
       # ---- Cleanup ----
 
@@ -215,6 +232,7 @@ jobs:
         with:
           files: |
             libera-lab-macos/libera-lab-macos.dmg
+            libera-lab-linux/libera-lab-linux.tar.gz
             libera-lab-windows/libera-lab-windows.zip
           generate_release_notes: true
 
@@ -233,6 +251,7 @@ jobs:
           # Copy the artifacts into public/downloads/<version>/
           mkdir -p "public/downloads/${VERSION}"
           cp ../libera-lab-macos/libera-lab-macos.dmg "public/downloads/${VERSION}/" || true
+          cp ../libera-lab-linux/libera-lab-linux.tar.gz "public/downloads/${VERSION}/" || true
           cp ../libera-lab-windows/libera-lab-windows.zip "public/downloads/${VERSION}/" || true
 
           # Update releases.json — prepend the new release
@@ -244,6 +263,7 @@ jobs:
               'version': '${VERSION}',
               'date': '${DATE}',
               'macos': 'downloads/${VERSION}/libera-lab-macos.dmg',
+              'linux': 'downloads/${VERSION}/libera-lab-linux.tar.gz',
               'windows': 'downloads/${VERSION}/libera-lab-windows.zip'
           }
           releases = [r for r in releases if r['version'] != '${VERSION}']

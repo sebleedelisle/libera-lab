@@ -160,75 +160,21 @@ jobs:
 
       # ---- Windows code signing & packaging ----
 
-      - name: Install CodeSignTool (Windows)
-        if: runner.os == 'Windows'
-        shell: powershell
-        run: |
-          # Download with redirect following
-          $url = "https://www.ssl.com/download/codesigntool-for-windows/"
-          $wc = New-Object System.Net.WebClient
-          $wc.DownloadFile($url, "CodeSignTool.zip")
-
-          # If that didn't work (HTML page), try the known direct URL
-          $fileSize = (Get-Item "CodeSignTool.zip").Length
-          if ($fileSize -lt 1000000) {
-            Write-Host "First download attempt returned small file ($fileSize bytes), trying direct URL..."
-            Invoke-WebRequest -Uri "https://www.ssl.com/download/codesigntool-for-windows/" -OutFile "CodeSignTool.zip" -MaximumRedirection 10
-          }
-
-          Expand-Archive -Path "CodeSignTool.zip" -DestinationPath "CodeSignTool" -Force
-
-          # Find and report the bat file location
-          $cst = Get-ChildItem -Path "CodeSignTool" -Recurse -Filter "CodeSignTool.bat" | Select-Object -First 1
-          if ($cst) {
-            Write-Host "Found CodeSignTool at: $($cst.FullName)"
-            echo "CST_PATH=$($cst.FullName)" >> $env:GITHUB_ENV
-          } else {
-            Write-Host "CodeSignTool.bat not found! Contents of CodeSignTool directory:"
-            Get-ChildItem -Path "CodeSignTool" -Recurse | Select-Object FullName
-            exit 1
-          }
-
       - name: Sign executable (Windows)
         if: runner.os == 'Windows'
-        timeout-minutes: 5
-        shell: powershell
-        run: |
-          Write-Host "CodeSignTool path: $env:CST_PATH"
-          $cstDir = Split-Path $env:CST_PATH
-          Write-Host "CodeSignTool directory contents:"
-          Get-ChildItem $cstDir | ForEach-Object { Write-Host "  $_" }
-          Write-Host "Input file exists: $(Test-Path 'build\Release\libera-lab.exe')"
-
-          # Run from the CodeSignTool directory so it can find its jre
-          Push-Location $cstDir
-          & .\CodeSignTool.bat sign `
-            "-username=$env:SSLCOM_USERNAME" `
-            "-password=$env:SSLCOM_PASSWORD" `
-            "-credential_id=$env:SSLCOM_CREDENTIAL_ID" `
-            "-totp_secret=$env:SSLCOM_TOTP_SECRET" `
-            "-input_file_path=$env:GITHUB_WORKSPACE\build\Release\libera-lab.exe" `
-            "-override=true"
-          $exitCode = $LASTEXITCODE
-          Pop-Location
-
-          if ($exitCode -ne 0) {
-            Write-Error "Code signing failed with exit code $exitCode"
-            exit 1
-          }
-
-          # Verify the signature was applied
-          $sig = Get-AuthenticodeSignature "build\Release\libera-lab.exe"
-          if ($sig.Status -ne "Valid") {
-            Write-Error "Signature verification failed: $($sig.Status)"
-            exit 1
-          }
-          Write-Host "Signature verified: $($sig.SignerCertificate.Subject)"
-        env:
-          SSLCOM_USERNAME: ${{ secrets.SSLCOM_USERNAME }}
-          SSLCOM_PASSWORD: ${{ secrets.SSLCOM_PASSWORD }}
-          SSLCOM_CREDENTIAL_ID: ${{ secrets.SSLCOM_CREDENTIAL_ID }}
-          SSLCOM_TOTP_SECRET: ${{ secrets.SSLCOM_TOTP_SECRET }}
+        uses: azure/trusted-signing-action@v0.5.0
+        with:
+          azure-tenant-id: ${{ vars.AZURE_TENANT_ID }}
+          azure-client-id: ${{ vars.AZURE_CLIENT_ID }}
+          azure-client-secret: ${{ secrets.AZURE_CLIENT_SECRET }}
+          endpoint: ${{ vars.AZURE_SIGNING_ENDPOINT }}
+          trusted-signing-account-name: ${{ vars.AZURE_CODE_SIGNING_ACCOUNT_NAME }}
+          certificate-profile-name: ${{ vars.AZURE_CERT_PROFILE_NAME }}
+          files-folder: build/Release
+          files-folder-filter: exe
+          file-digest: SHA256
+          timestamp-rfc3161: http://timestamp.acs.microsoft.com
+          timestamp-digest: SHA256
 
       - name: Package (Windows)
         if: runner.os == 'Windows'

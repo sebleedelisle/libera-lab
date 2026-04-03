@@ -124,9 +124,28 @@ endif()
 
 target_include_directories(libera-lab PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 target_link_libraries(libera-lab PRIVATE libera-core imgui_lib)
+target_compile_definitions(libera-lab PRIVATE APP_VERSION="${PROJECT_VERSION}")
 
 if (MSVC)
     target_compile_options(libera-lab PRIVATE /W4 /permissive- /FS)
 else()
     target_compile_options(libera-lab PRIVATE -Wall -Wextra -Wpedantic)
 endif()
+
+# ---- Clear app settings on build ----
+if (APPLE)
+    set(_settings_dir "$ENV{HOME}/Library/Application Support/LiberaLab")
+elseif (WIN32)
+    set(_settings_dir "$ENV{APPDATA}/LiberaLab")
+else()
+    if (DEFINED ENV{XDG_CONFIG_HOME})
+        set(_settings_dir "$ENV{XDG_CONFIG_HOME}/LiberaLab")
+    else()
+        set(_settings_dir "$ENV{HOME}/.config/LiberaLab")
+    endif()
+endif()
+add_custom_target(clear-settings ALL
+    COMMAND ${CMAKE_COMMAND} -E rm -rf "${_settings_dir}"
+    COMMENT "Clearing LiberaLab settings folder"
+)
+add_dependencies(libera-lab clear-settings)

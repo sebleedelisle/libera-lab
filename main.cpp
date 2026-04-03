@@ -37,6 +37,7 @@ extern const unsigned int ForkAwesome_compressed_data[];
 #include <cmath>
 #include <cstdio>
 #include <fstream>
+#include <condition_variable>
 #include <future>
 #include <memory>
 #include <mutex>
@@ -105,7 +106,7 @@ struct SpectrumBands {
 
 static constexpr int NUM_PATTERNS = 4;
 static const char* patternNames[NUM_PATTERNS] = {
-    "White Square", "White Circle", "Orientation", "Hot Corners"
+    "White Square", "Rainbow Circle", "Orientation", "Hot Corners"
 };
 
 enum class OutputMode { Shape, Point, Pattern };
@@ -150,7 +151,7 @@ struct AppState {
     int patternIndex = 0;
     int pointPatternIndex = 0; // 0=single, 1=2V, 2=2H, 3=4grid, 4=8row
     float dutyCycle = 25.0f; // point mode duty cycle %
-    int pointRateIndex = 4;
+    int pointRateIndex = 0;
     int customPointRate = 30000;
     float outputSize = 50.0f;
     float outputX = 0.0f;
@@ -162,8 +163,8 @@ struct AppState {
     bool singleColour = false;
 
     // Window geometry (saved/restored)
-    int windowWidth = 1360;
-    int windowHeight = 1050;
+    int windowWidth = 1020;
+    int windowHeight = 890;
     int windowX = -1; // -1 = let OS decide
     int windowY = -1;
 
@@ -197,6 +198,8 @@ struct AppState {
     std::vector<DiscoveredInfo> latestDiscovered;
     std::atomic<bool> discoveryResultReady{false};
     std::atomic<bool> discoveryRequested{false};
+    std::mutex discoveryCvMutex;
+    std::condition_variable discoveryCv;
 
     struct PointRatePreset {
         const char* label;
@@ -409,10 +412,23 @@ static core::Frame makeCircleFrame(float size, float cx, float cy) {
     for (int i = 0; i < pointCount; ++i) {
         float t = static_cast<float>(i) / static_cast<float>(pointCount);
         float angle = t * TAU;
+        // Rainbow: hue cycles around the circle
+        float h = t * 6.0f;
+        int hi = static_cast<int>(h) % 6;
+        float f = h - std::floor(h);
+        float r, g, b;
+        switch (hi) {
+            case 0: r = 1; g = f;     b = 0;     break;
+            case 1: r = 1 - f; g = 1; b = 0;     break;
+            case 2: r = 0; g = 1;     b = f;     break;
+            case 3: r = 0; g = 1 - f; b = 1;     break;
+            case 4: r = f; g = 0;     b = 1;     break;
+            default:r = 1; g = 0;     b = 1 - f; break;
+        }
         frame.points.push_back({
             cx + radius * std::cos(angle),
             cy + radius * std::sin(angle),
-            1, 1, 1
+            r, g, b
         });
     }
     return frame;
@@ -487,44 +503,65 @@ static core::Frame makeHotCornersFrame(float size, float cx, float cy) {
 }
 
 // Generate point positions for a given point pattern
-static std::vector<std::pair<float,float>> getPointPositions(int patternIndex, float cx, float cy, float spacing) {
-    std::vector<std::pair<float,float>> pts;
+struct PointDot { float x, y, r, g, b; };
+
+static std::vector<PointDot> getPointPositions(int patternIndex, float cx, float cy, float spacing) {
+    std::vector<PointDot> pts;
     float s = spacing * 0.3f; // spacing between dots
     switch (patternIndex) {
         case 0: // Single
-            pts.push_back({cx, cy});
+            pts.push_back({cx, cy, 1, 1, 1});
             break;
         case 1: // 2 Vertical
-            pts.push_back({cx, cy - s});
-            pts.push_back({cx, cy + s});
+            pts.push_back({cx, cy - s, 1, 1, 1});
+            pts.push_back({cx, cy + s, 1, 1, 1});
             break;
         case 2: // 2 Horizontal
-            pts.push_back({cx - s, cy});
-            pts.push_back({cx + s, cy});
+            pts.push_back({cx - s, cy, 1, 1, 1});
+            pts.push_back({cx + s, cy, 1, 1, 1});
             break;
-        case 3: // 4 Grid
-            pts.push_back({cx - s, cy - s});
-            pts.push_back({cx + s, cy - s});
-            pts.push_back({cx + s, cy + s});
-            pts.push_back({cx - s, cy + s});
+        case 3: // 4 Grid — RGBW: top-left=green, top-right=red, bottom-right=white, bottom-left=blue
+            pts.push_back({cx - s, cy - s, 0, 1, 0});  // bottom-left (screen): green
+            pts.push_back({cx + s, cy - s, 1, 0, 0});  // bottom-right (screen): red
+            pts.push_back({cx + s, cy + s, 1, 1, 1});  // top-right (screen): white
+            pts.push_back({cx - s, cy + s, 0, 0, 1});  // top-left (screen): blue
             break;
-        case 4: // 8 Row — left-to-right then right-to-left
+        case 4: // 8 Row — rainbow, left-to-right then right-to-left
         {
             float halfW = spacing * 0.8f;
+            auto hueToRGB = [](float h) -> PointDot {
+                float hh = h * 6.0f;
+                int hi = static_cast<int>(hh) % 6;
+                float f = hh - std::floor(hh);
+                float r, g, b;
+                switch (hi) {
+                    case 0: r=1; g=f;   b=0;   break;
+                    case 1: r=1-f; g=1; b=0;   break;
+                    case 2: r=0; g=1;   b=f;   break;
+                    case 3: r=0; g=1-f; b=1;   break;
+                    case 4: r=f; g=0;   b=1;   break;
+                    default:r=1; g=0;   b=1-f; break;
+                }
+                return {0, 0, r, g, b};
+            };
             // Left to right
             for (int i = 0; i < 8; ++i) {
                 float t = (static_cast<float>(i) / 7.0f - 0.5f) * 2.0f * halfW;
-                pts.push_back({cx + t, cy});
+                auto dot = hueToRGB(static_cast<float>(i) / 8.0f);
+                dot.x = cx + t; dot.y = cy;
+                pts.push_back(dot);
             }
             // Right to left (skip endpoints to avoid double-dwell)
             for (int i = 6; i >= 1; --i) {
                 float t = (static_cast<float>(i) / 7.0f - 0.5f) * 2.0f * halfW;
-                pts.push_back({cx + t, cy});
+                auto dot = hueToRGB(static_cast<float>(i) / 8.0f);
+                dot.x = cx + t; dot.y = cy;
+                pts.push_back(dot);
             }
             break;
         }
         default:
-            pts.push_back({cx, cy});
+            pts.push_back({cx, cy, 1, 1, 1});
             break;
     }
     return pts;
@@ -541,24 +578,25 @@ static core::Frame makePointFrame(int patternIndex,
 
     frame.points.reserve((dwellPerDot + transitPoints) * numDots);
     for (int d = 0; d < numDots; ++d) {
-        auto [px, py] = positions[d];
+        auto& dot = positions[d];
 
         // Dwell on this dot (with duty cycle)
         for (int i = 0; i < dwellPerDot; ++i) {
             if (i < onPoints) {
-                frame.points.push_back({px, py, 1, 1, 1});
+                frame.points.push_back({dot.x, dot.y, dot.r, dot.g, dot.b});
             } else {
-                frame.points.push_back({px, py, 0, 0, 0});
+                frame.points.push_back({dot.x, dot.y, 0, 0, 0});
             }
         }
 
         // Smooth blank transit to next dot
         if (numDots > 1) {
-            auto [nx, ny] = positions[(d + 1) % numDots];
+            auto& next = positions[(d + 1) % numDots];
+            float nx = next.x, ny = next.y;
             for (int i = 0; i < transitPoints; ++i) {
                 float t = static_cast<float>(i + 1) / static_cast<float>(transitPoints + 1);
-                float tx = px + t * (nx - px);
-                float ty = py + t * (ny - py);
+                float tx = dot.x + t * (nx - dot.x);
+                float ty = dot.y + t * (ny - dot.y);
                 frame.points.push_back({tx, ty, 0, 0, 0});
             }
         }
@@ -1020,15 +1058,29 @@ static void drawPreview(AppState& state, ImVec2 pos, ImVec2 size) {
     // Source pattern
     if (showSource) {
         if (state.outputMode == 0) {
-            drawPatternInRect(drawList, state.patternIndex, previewSize, previewCx, previewCy,
-                              pos, size, previewBrightness, true, viewScale, viewOffX, viewOffY);
+            // Draw from previewFrame (single colour applied, before brightness)
+            float brightness = state.armed ? 1.0f : 0.47f;
+            for (std::size_t i = 1; i < state.previewFrame.points.size(); ++i) {
+                auto& p0 = state.previewFrame.points[i - 1];
+                auto& p1 = state.previewFrame.points[i];
+                uint8_t cr = static_cast<uint8_t>(std::min(255.0f, p1.r * 255.0f * brightness));
+                uint8_t cg = static_cast<uint8_t>(std::min(255.0f, p1.g * 255.0f * brightness));
+                uint8_t cb = static_cast<uint8_t>(std::min(255.0f, p1.b * 255.0f * brightness));
+                if (cr == 0 && cg == 0 && cb == 0) continue;
+                drawList->AddLine(
+                    ImVec2(mapX(p0.x), mapY(p0.y)),
+                    ImVec2(mapX(p1.x), mapY(p1.y)),
+                    IM_COL32(cr, cg, cb, 255), 1.5f);
+            }
         } else if (state.outputMode == 1) {
-            uint8_t bv = static_cast<uint8_t>(previewBrightness * 255);
             auto positions = getPointPositions(state.pointPatternIndex, previewCx, previewCy, previewSize);
-            for (auto& [px, py] : positions) {
-                float dotX = mapX(px);
-                float dotY = mapY(py);
-                drawList->AddCircleFilled(ImVec2(dotX, dotY), 4.0f, IM_COL32(bv, bv, bv, 255));
+            for (auto& dot : positions) {
+                float dotX = mapX(dot.x);
+                float dotY = mapY(dot.y);
+                uint8_t cr = static_cast<uint8_t>(dot.r * previewBrightness * 255);
+                uint8_t cg = static_cast<uint8_t>(dot.g * previewBrightness * 255);
+                uint8_t cb = static_cast<uint8_t>(dot.b * previewBrightness * 255);
+                drawList->AddCircleFilled(ImVec2(dotX, dotY), 4.0f, IM_COL32(cr, cg, cb, 255));
                 drawList->AddLine(ImVec2(dotX - 8, dotY), ImVec2(dotX + 8, dotY), IM_COL32(80, 80, 80, 140));
                 drawList->AddLine(ImVec2(dotX, dotY - 8), ImVec2(dotX, dotY + 8), IM_COL32(80, 80, 80, 140));
             }
@@ -1217,9 +1269,12 @@ static void discoveryThreadFunc(AppState& state) {
                 state.latestDiscovered.push_back({d->idValue(), d->labelValue(), d->type(), d->maxPointRate(), d->usageState()});
             state.discoveryResultReady.store(true);
         }
-        for (int i = 0; i < 20 && state.discoveryRunning.load(); ++i) {
-            if (state.discoveryRequested.load()) { state.discoveryRequested.store(false); break; }
-            std::this_thread::sleep_for(100ms);
+        {
+            std::unique_lock<std::mutex> lk(state.discoveryCvMutex);
+            state.discoveryCv.wait_for(lk, 2000ms, [&] {
+                return !state.discoveryRunning.load() || state.discoveryRequested.load();
+            });
+            state.discoveryRequested.store(false);
         }
     }
     state.discoveryFinished.store(true, std::memory_order_release);
@@ -1389,16 +1444,27 @@ static void disconnectController(ControllerEntry& entry) {
 // Custom toggle button widget — sized to match slider height
 // ---------------------------------------------------------------------------
 
-static bool toggleButton(const char* label, bool* v, bool showConnecting = false) {
+static bool toggleButton(const char* label, bool* v, bool showConnecting = false, float sizeOverride = 0.0f, const char* text = nullptr) {
     ImGui::PushID(label);
     bool clicked = false;
     bool on = *v;
 
-    ImVec2 p = ImGui::GetCursorScreenPos();
+    float frameH = ImGui::GetFrameHeight();
+    float sz = (sizeOverride > 0) ? sizeOverride : frameH;
+    float yPad = (frameH - sz) * 0.5f;
+
+    // Calculate total width including text label if provided
+    float totalW = sz;
+    if (text) {
+        float textW = ImGui::CalcTextSize(text).x;
+        totalW += ImGui::GetStyle().ItemInnerSpacing.x + textW;
+    }
+
+    ImVec2 cursor = ImGui::GetCursorScreenPos();
+    ImVec2 p(cursor.x, cursor.y + yPad);
     ImDrawList* drawList = ImGui::GetWindowDrawList();
 
-    float sz = ImGui::GetFrameHeight();
-    if (ImGui::InvisibleButton("##toggle", ImVec2(sz, sz))) {
+    if (ImGui::InvisibleButton("##toggle", ImVec2(totalW, frameH))) {
         *v = !*v;
         clicked = true;
         on = *v;
@@ -1420,6 +1486,14 @@ static bool toggleButton(const char* label, bool* v, bool showConnecting = false
         drawList->AddRectFilled(
             ImVec2(p.x + m, p.y + m), ImVec2(p.x + sz - m, p.y + sz - m),
             IM_COL32(255, 255, 255, 255), 1.0f);
+    }
+
+    // Draw text label if provided
+    if (text) {
+        float textX = p.x + sz + ImGui::GetStyle().ItemInnerSpacing.x;
+        float textY = cursor.y + (frameH - ImGui::GetTextLineHeight()) * 0.5f;
+        ImU32 textCol = hovered ? IM_COL32(255, 255, 255, 255) : IM_COL32(200, 200, 200, 255);
+        drawList->AddText(ImVec2(textX, textY), textCol, text);
     }
 
     ImGui::PopID();
@@ -1555,6 +1629,7 @@ int main(int /*argc*/, char* argv[]) {
     // ---- Style ----
     ImGuiStyle& style = ImGui::GetStyle();
     style.WindowRounding = 4.0f; style.WindowBorderSize = 0.0f; style.IndentSpacing = 0.0f;
+    style.WindowPadding = ImVec2(16.0f, 16.0f);
     style.ItemSpacing = ImVec2(6.0f, 6.0f); style.ItemInnerSpacing = ImVec2(6.0f, 6.0f);
     style.WindowMinSize = ImVec2(10.0f, 10.0f); style.FramePadding = ImVec2(8.0f, 6.0f);
     style.FrameRounding = 2.0f; style.GrabRounding = 1.0f; style.GrabMinSize = 16.0f; style.PopupRounding = 8.0f;
@@ -1664,11 +1739,20 @@ int main(int /*argc*/, char* argv[]) {
             if (ImGui::IsKeyPressed(ImGuiKey_B))
                 soloOrToggle(&state.blueEnabled);
 
-            // 1–9 = 10%–90%, 0 = 100% brightness
-            for (int n = 0; n <= 9; ++n) {
-                if (ImGui::IsKeyPressed((ImGuiKey)(ImGuiKey_0 + n)))
-                    state.brightness = (n == 0) ? 100.0f : n * 10.0f;
+            // 1–0 = fixed brightness levels
+            {
+                constexpr float levels[] = { 100.0f, 0.5f, 1.0f, 5.0f, 10.0f, 20.0f, 30.0f, 40.0f, 50.0f, 80.0f };
+                for (int n = 0; n <= 9; ++n) {
+                    if (ImGui::IsKeyPressed((ImGuiKey)(ImGuiKey_0 + n)))
+                        state.brightness = levels[n];
+                }
             }
+
+            // =/- = brightness up/down by 1%, min 0.5%
+            if (ImGui::IsKeyPressed(ImGuiKey_Equal, false))
+                state.brightness = std::min(std::floor(state.brightness) + 1.0f, 100.0f);
+            if (ImGui::IsKeyPressed(ImGuiKey_Minus, false))
+                state.brightness = std::max(std::ceil(state.brightness) - 1.0f, 0.5f);
         }
 
         ImGuiViewport* viewport = ImGui::GetMainViewport();
@@ -1760,7 +1844,7 @@ int main(int /*argc*/, char* argv[]) {
 
         // Brightness slider (no label)
         ImGui::PushItemWidth(controlPanelWidth - 16.0f);
-        ImGui::SliderFloat("##brightness", &state.brightness, 0.0f, 100.0f, "%.0f%%");
+        ImGui::SliderFloat("##brightness", &state.brightness, 0.5f, 100.0f, "%.1f%%");
         ImGui::PopItemWidth();
 
         // RGB sliders — three side by side, under brightness
@@ -1829,7 +1913,6 @@ int main(int /*argc*/, char* argv[]) {
         // Mode-specific content
         if (state.outputMode == 0) {
             // Shape mode — pattern thumbnails
-            ImGui::Text("Test Pattern");
             {
                 float thumbSize = 80.0f;
                 float spacing = 8.0f;
@@ -1878,6 +1961,20 @@ int main(int /*argc*/, char* argv[]) {
                     }
                 }
             }
+
+            // Single colour toggle
+            ImGui::Spacing();
+            {
+                bool wasOn = state.singleColour;
+                if (wasOn) {
+                    ImGui::PushStyleColor(ImGuiCol_Button,       (ImVec4)ImColor(174, 84, 0));
+                    ImGui::PushStyleColor(ImGuiCol_ButtonHovered, (ImVec4)ImColor(206, 115, 0));
+                    ImGui::PushStyleColor(ImGuiCol_ButtonActive,  (ImVec4)ImColor(218, 145, 65));
+                }
+                if (ImGui::Button("SINGLE COLOUR MODE##shape"))
+                    state.singleColour = !state.singleColour;
+                if (wasOn) ImGui::PopStyleColor(3);
+            }
         } else if (state.outputMode == 1) {
             // Point mode — pattern thumbnails
             {
@@ -1900,12 +1997,15 @@ int main(int /*argc*/, char* argv[]) {
                         borderCol, 2.0f, 0, borderThickness);
 
                     // Draw the dot pattern in the thumbnail
-                    uint8_t tv = selected ? 255 : 150;
+                    float tb = selected ? 1.0f : 0.6f;
                     auto positions = getPointPositions(i, 0.0f, 0.0f, 1.0f);
-                    for (auto& [px, py] : positions) {
-                        float dx = thumbPos.x + (px + 1.0f) * 0.5f * thumbSize;
-                        float dy = thumbPos.y + ((-py) + 1.0f) * 0.5f * thumbSize;
-                        ptDrawList->AddCircleFilled(ImVec2(dx, dy), 3.0f, IM_COL32(tv, tv, tv, 255));
+                    for (auto& dot : positions) {
+                        float dx = thumbPos.x + (dot.x + 1.0f) * 0.5f * thumbSize;
+                        float dy = thumbPos.y + ((-dot.y) + 1.0f) * 0.5f * thumbSize;
+                        uint8_t cr = static_cast<uint8_t>(dot.r * tb * 255);
+                        uint8_t cg = static_cast<uint8_t>(dot.g * tb * 255);
+                        uint8_t cb = static_cast<uint8_t>(dot.b * tb * 255);
+                        ptDrawList->AddCircleFilled(ImVec2(dx, dy), 3.0f, IM_COL32(cr, cg, cb, 255));
                     }
 
                     // Label
@@ -1926,7 +2026,7 @@ int main(int /*argc*/, char* argv[]) {
                         state.pointPatternIndex = i;
                     ImGui::PopStyleColor(3);
 
-                    bool endOfRow = ((i + 1) % 4 == 0);
+                    bool endOfRow = ((i + 1) % 5 == 0);
                     bool lastItem = (i == NUM_POINT_PATTERNS - 1);
                     if (!endOfRow && !lastItem) {
                         ImGui::SameLine(0, spacing);
@@ -1942,6 +2042,20 @@ int main(int /*argc*/, char* argv[]) {
             ImGui::PushItemWidth(controlPanelWidth - 16.0f);
             ImGui::SliderFloat("##duty", &state.dutyCycle, 1.0f, 100.0f, "%.0f%%");
             ImGui::PopItemWidth();
+
+            // Single colour toggle
+            ImGui::Spacing();
+            {
+                bool wasOn = state.singleColour;
+                if (wasOn) {
+                    ImGui::PushStyleColor(ImGuiCol_Button,       (ImVec4)ImColor(174, 84, 0));
+                    ImGui::PushStyleColor(ImGuiCol_ButtonHovered, (ImVec4)ImColor(206, 115, 0));
+                    ImGui::PushStyleColor(ImGuiCol_ButtonActive,  (ImVec4)ImColor(218, 145, 65));
+                }
+                if (ImGui::Button("SINGLE COLOUR MODE##point"))
+                    state.singleColour = !state.singleColour;
+                if (wasOn) ImGui::PopStyleColor(3);
+            }
         } else {
             // Pattern mode — ILDA pattern grid
             if (state.ildaPatterns.empty()) {
@@ -2029,6 +2143,8 @@ int main(int /*argc*/, char* argv[]) {
             }
         }
 
+        ImGui::Separator();
+        ImGui::Spacing();
         ImGui::Text("Point Rate");
         {
             float btnWidth = 52.0f, btnSpacing = 4.0f;
@@ -2093,8 +2209,6 @@ int main(int /*argc*/, char* argv[]) {
         {
             float degrees = state.outputSize / 100.0f * MAX_SCAN_ANGLE;
             ImGui::Text("Output  %.0f%%  (%.1f" "\xc2\xb0" ")", state.outputSize, degrees);
-            ImGui::SameLine(controlPanelWidth - 70.0f);
-            if (ImGui::SmallButton("RESET")) state.resetOutput();
 
             // Size angle presets
             {
@@ -2120,7 +2234,10 @@ int main(int /*argc*/, char* argv[]) {
             }
 
             float totalWidth = controlPanelWidth - 16.0f;
-            float dragW = (totalWidth - 80.0f) / 3.0f;
+            bool nonDefault = (std::abs(state.outputSize - 50.0f) > 0.5f ||
+                               std::abs(state.outputX) > 0.5f ||
+                               std::abs(state.outputY) > 0.5f);
+            float dragW = (totalWidth - 80.0f) / 3.0f * 0.6f;
             ImGui::PushItemWidth(dragW);
 
             ImGui::AlignTextToFramePadding();
@@ -2136,9 +2253,16 @@ int main(int /*argc*/, char* argv[]) {
             ImGui::DragFloat("##yoffset", &state.outputY, 0.5f, -100.0f, 100.0f, "%.0f");
             state.outputY = std::clamp(state.outputY, -100.0f, 100.0f);
 
+            if (nonDefault) {
+                ImGui::SameLine(0, 4);
+                if (ImGui::Button(ICON_FK_UNDO "##resetSXY", ImVec2(ImGui::GetFrameHeight(), 0)))
+                    state.resetOutput();
+            }
+
             ImGui::PopItemWidth();
         }
 
+        ImGui::Spacing();
         ImGui::Spacing();
 
         // Orientation
@@ -2180,6 +2304,7 @@ int main(int /*argc*/, char* argv[]) {
             }
         }
 
+        ImGui::Spacing();
         ImGui::Spacing();
 
         // Scanner sync
@@ -2437,7 +2562,9 @@ int main(int /*argc*/, char* argv[]) {
 
                     ImGui::Dummy(ImVec2(sgWidth, sgHeight + sgTickH + ImGui::GetTextLineHeight() + 2.0f));
                     if (strainVal > 250.0f) {
-                        ImGui::TextColored(ImVec4(1.0f, 0.3f, 0.3f, 1.0f),
+                        bool flash = strainVal > 425.0f && std::fmod(ImGui::GetTime(), 1.0) > 0.75;
+                        float alpha = flash ? 0.0f : 1.0f;
+                        ImGui::TextColored(ImVec4(1.0f, 0.3f, 0.3f, alpha),
                             ICON_FK_EXCLAMATION_TRIANGLE " Warning - high scanner load");
                     } else {
                         ImGui::TextDisabled("%.1f " "\xc2\xb0" "/ms" "\xc2\xb2", strainVal);
@@ -2450,17 +2577,16 @@ int main(int /*argc*/, char* argv[]) {
 
         // ---- Bottom: Controller list ----
         ImGui::SetCursorScreenPos(ImVec2(previewPos.x, previewPos.y + previewSize + 12.0f));
-        ImGui::BeginChild("Controllers", ImVec2(previewSize, 0), ImGuiChildFlags_Border);
+        ImGui::BeginChild("Controllers", ImVec2(previewSize, 0), ImGuiChildFlags_None);
 
-        ImGui::Text("Discovered Controllers");
-        ImGui::SameLine();
-        if (ImGui::SmallButton("RESCAN")) state.discoveryRequested.store(true);
-        ImGui::Separator();
+        if (ImGui::Button("RESCAN")) { state.discoveryRequested.store(true); state.discoveryCv.notify_one(); }
 
         if (state.controllers.empty()) {
             ImGui::TextDisabled("Searching for controllers...");
         } else {
-            float enableSz = ImGui::GetFrameHeight();
+            float enableSz = ImGui::GetFrameHeight() * 0.8f;
+            float frameH = ImGui::GetFrameHeight();
+            float yPad = (frameH - enableSz) * 0.5f;
             ImDrawList* ctrlDrawList = ImGui::GetWindowDrawList();
 
             for (auto& entry : state.controllers) {
@@ -2471,9 +2597,10 @@ int main(int /*argc*/, char* argv[]) {
                      entry.usageState == core::ControllerUsageState::BusyExclusive);
                 if (busyElsewhere) ImGui::BeginDisabled();
 
-                // Status indicator square — same size as enable toggle
+                // Status indicator square
                 {
-                    ImVec2 p = ImGui::GetCursorScreenPos();
+                    ImVec2 cursor = ImGui::GetCursorScreenPos();
+                    ImVec2 p(cursor.x, cursor.y + yPad);
                     ImU32 statusCol;
                     core::ControllerStatus status = core::ControllerStatus::Good;
                     if (!entry.controller || !entry.enabled) {
@@ -2489,7 +2616,7 @@ int main(int /*argc*/, char* argv[]) {
                     ctrlDrawList->AddRectFilled(p, ImVec2(p.x + enableSz, p.y + enableSz),
                                             statusCol, 2.0f);
 
-                    ImGui::InvisibleButton("##status", ImVec2(enableSz, enableSz));
+                    ImGui::InvisibleButton("##status", ImVec2(enableSz, frameH));
                     if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) {
                         ImGui::BeginTooltip();
                         if (busyElsewhere) {
@@ -2516,12 +2643,13 @@ int main(int /*argc*/, char* argv[]) {
                 }
 
                 bool wasEnabled = entry.enabled;
-                toggleButton("##enable", &entry.enabled, entry.connecting);
-                ImGui::SameLine();
-                if (entry.controller && entry.enabled) {
-                    ImGui::Text("%s  %u pps", entry.label.c_str(), entry.controller->getPointRate());
-                } else {
-                    ImGui::Text("%s", entry.label.c_str());
+                {
+                    char textBuf[128];
+                    if (entry.controller && entry.enabled)
+                        std::snprintf(textBuf, sizeof(textBuf), "%s  %u pps", entry.label.c_str(), entry.controller->getPointRate());
+                    else
+                        std::snprintf(textBuf, sizeof(textBuf), "%s", entry.label.c_str());
+                    toggleButton("##enable", &entry.enabled, entry.connecting, enableSz, textBuf);
                 }
 
                 if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) {
@@ -2546,19 +2674,9 @@ int main(int /*argc*/, char* argv[]) {
 
         ImGui::EndChild();
 
-        // Logo: top-right if space, otherwise top-left over preview
-        {
-            ImVec2 winPos = ImGui::GetWindowPos();
-            float winW = ImGui::GetWindowWidth();
-            float controlsRight = previewPos.x + previewSize + 16.0f + controlPanelWidth;
-            float logoAreaStart = controlsRight + 8.0f;
-            float logoAreaWidth = (winPos.x + winW - 8.0f) - logoAreaStart;
-            if (logoAreaWidth < 120.0f ||
-                !drawLogo(io, ImVec2(logoAreaStart, winPos.y + 4.0f), logoAreaWidth, true)) {
-                drawLogo(io, ImVec2(previewPos.x + 6.0f, previewPos.y + 4.0f),
-                         previewSize - 12.0f, false, ImGui::GetForegroundDrawList());
-            }
-        }
+        // Logo: top-left of preview, on foreground so it's always visible
+        drawLogo(io, ImVec2(previewPos.x + 16.0f, previewPos.y + 10.0f),
+                 previewSize - 22.0f, false, ImGui::GetForegroundDrawList());
 
         ImGui::End();
 
@@ -2578,6 +2696,7 @@ int main(int /*argc*/, char* argv[]) {
     saveSettings(state);
 
     state.discoveryRunning.store(false);
+    state.discoveryCv.notify_one();
     libera::core::timedJoin(state.discoveryThread, state.discoveryFinished,
                             std::chrono::milliseconds(3000), "discoveryThread");
     for (auto& entry : state.controllers) disconnectController(entry);

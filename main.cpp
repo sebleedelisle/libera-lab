@@ -1477,14 +1477,16 @@ static bool drawLogo(ImGuiIO& io, ImVec2 pos, float areaWidth,
     drawList->AddText(defaultFont, subFontSize, ImVec2(subX, subY),
                       IM_COL32(100, 100, 100, 200), sub);
 
-    // Clickable area over the whole logo + subtitle
+    // Clickable area over the whole logo + subtitle (manual hit test
+    // so it works even when drawn over other widgets like the preview)
     float totalH = s1.y + 1.0f + subSize.y;
-    ImGui::SetCursorScreenPos(ImVec2(x, y));
-    ImGui::InvisibleButton("##logo_link", ImVec2(totalW, totalH));
-    if (ImGui::IsItemHovered())
+    ImVec2 mouse = ImGui::GetMousePos();
+    if (mouse.x >= x && mouse.x <= x + totalW &&
+        mouse.y >= y && mouse.y <= y + totalH) {
         ImGui::SetMouseCursor(ImGuiMouseCursor_Hand);
-    if (ImGui::IsItemClicked())
-        openURL("https://liberationlaser.com");
+        if (ImGui::IsMouseClicked(ImGuiMouseButton_Left))
+            openURL("https://liberationlaser.com");
+    }
 
     return true;
 }
@@ -1858,8 +1860,12 @@ int main(int /*argc*/, char* argv[]) {
                     ImGui::SetCursorScreenPos(thumbPos);
                     char btnId[32];
                     std::snprintf(btnId, sizeof(btnId), "##thumb%d", i);
-                    if (ImGui::InvisibleButton(btnId, ImVec2(thumbSize, thumbSize)))
+                    ImGui::PushStyleColor(ImGuiCol_Button, IM_COL32(0, 0, 0, 0));
+                    ImGui::PushStyleColor(ImGuiCol_ButtonHovered, IM_COL32(255, 255, 255, 30));
+                    ImGui::PushStyleColor(ImGuiCol_ButtonActive, IM_COL32(255, 255, 255, 50));
+                    if (ImGui::Button(btnId, ImVec2(thumbSize, thumbSize)))
                         state.patternIndex = i;
+                    ImGui::PopStyleColor(3);
 
                     bool endOfRow = ((i + 1) % 4 == 0);
                     bool lastItem = (i == NUM_PATTERNS - 1);
@@ -1913,8 +1919,12 @@ int main(int /*argc*/, char* argv[]) {
                     ImGui::SetCursorScreenPos(thumbPos);
                     char btnId[32];
                     std::snprintf(btnId, sizeof(btnId), "##ptpat%d", i);
-                    if (ImGui::InvisibleButton(btnId, ImVec2(thumbSize, thumbSize)))
+                    ImGui::PushStyleColor(ImGuiCol_Button, IM_COL32(0, 0, 0, 0));
+                    ImGui::PushStyleColor(ImGuiCol_ButtonHovered, IM_COL32(255, 255, 255, 30));
+                    ImGui::PushStyleColor(ImGuiCol_ButtonActive, IM_COL32(255, 255, 255, 50));
+                    if (ImGui::Button(btnId, ImVec2(thumbSize, thumbSize)))
                         state.pointPatternIndex = i;
+                    ImGui::PopStyleColor(3);
 
                     bool endOfRow = ((i + 1) % 4 == 0);
                     bool lastItem = (i == NUM_POINT_PATTERNS - 1);
@@ -1972,8 +1982,12 @@ int main(int /*argc*/, char* argv[]) {
                     ImGui::SetCursorScreenPos(thumbPos);
                     char btnId[32];
                     std::snprintf(btnId, sizeof(btnId), "##ilda%d", i);
-                    if (ImGui::InvisibleButton(btnId, ImVec2(thumbSize, thumbSize)))
+                    ImGui::PushStyleColor(ImGuiCol_Button, IM_COL32(0, 0, 0, 0));
+                    ImGui::PushStyleColor(ImGuiCol_ButtonHovered, IM_COL32(255, 255, 255, 30));
+                    ImGui::PushStyleColor(ImGuiCol_ButtonActive, IM_COL32(255, 255, 255, 50));
+                    if (ImGui::Button(btnId, ImVec2(thumbSize, thumbSize)))
                         state.selectedIldaPattern = i;
+                    ImGui::PopStyleColor(3);
 
                     int col = i % cols;
                     if (col < cols - 1 && i < static_cast<int>(state.ildaPatterns.size()) - 1) {

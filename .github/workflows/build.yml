@@ -201,6 +201,34 @@ jobs:
           mkdir -p staging/libera-lab
           cp build/libera-lab staging/libera-lab/
           cp -r build/patterns staging/libera-lab/ || true
+          sed 's/^            //' > staging/libera-lab/README.txt <<'EOF'
+            Libera Lab (Linux)
+            ==================
+
+            To run:
+                ./libera-lab
+
+            Required system library
+            -----------------------
+            Libera Lab needs libusb 1.0 installed on your system to talk to
+            laser DACs over USB. If you see an error like:
+
+                error while loading shared libraries: libusb-1.0.so.0:
+                cannot open shared object file: No such file or directory
+
+            install it with your package manager:
+
+                Debian / Ubuntu / Mint:   sudo apt install libusb-1.0-0
+                Fedora / RHEL:            sudo dnf install libusbx
+                Arch / Manjaro:           sudo pacman -S libusb
+
+            USB permissions
+            ---------------
+            On most distros, accessing USB devices as a normal user requires
+            a udev rule. If Libera Lab can't see your DAC, you may need to
+            add your user to the "plugdev" group or install a udev rule for
+            the device.
+          EOF
           tar -czf libera-lab-linux.tar.gz -C staging libera-lab
 
       - name: Package (Windows)

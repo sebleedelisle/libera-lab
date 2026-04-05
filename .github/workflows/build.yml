@@ -83,18 +83,30 @@ jobs:
       - name: Bundle libusb into app (macOS)
         if: runner.os == 'macOS'
         run: |
-          # Find where libusb is linked from
-          LIBUSB_PATH=$(otool -L build/libera-lab.app/Contents/MacOS/libera-lab | grep libusb | awk '{print $1}')
+          # Find where libusb is linked from (the binary may contain duplicate
+          # LC_LOAD_DYLIB entries — dedupe so we don't pass a multi-line string
+          # to install_name_tool, which would silently match nothing).
+          LIBUSB_PATH=$(otool -L build/libera-lab.app/Contents/MacOS/libera-lab | grep libusb | awk '{print $1}' | sort -u)
           echo "Current libusb path: $LIBUSB_PATH"
 
           # Copy bundled universal libusb into the Frameworks folder
           mkdir -p build/libera-lab.app/Contents/Frameworks
           cp libs/libera-core/libs/helios_dac/sdk/cpp/libusb_bin/macOS/libusb-1.0.0.dylib build/libera-lab.app/Contents/Frameworks/
 
-          # Rewrite the executable to look for libusb inside the bundle
+          # Rewrite the executable to look for libusb inside the bundle.
+          # install_name_tool -change replaces all matching LC_LOAD_DYLIB entries.
           install_name_tool -change "$LIBUSB_PATH" \
             @executable_path/../Frameworks/libusb-1.0.0.dylib \
             build/libera-lab.app/Contents/MacOS/libera-lab
+
+          # Verify the rewrite actually happened — fail the build if libusb
+          # still resolves via @rpath (which would crash on end-user machines
+          # since the only baked-in rpath points at the CI runner's filesystem).
+          if otool -L build/libera-lab.app/Contents/MacOS/libera-lab | grep -q '@rpath/libusb'; then
+            echo "ERROR: libusb is still referenced via @rpath after install_name_tool"
+            otool -L build/libera-lab.app/Contents/MacOS/libera-lab | grep libusb
+            exit 1
+          fi
 
           # Fix the dylib's own ID
           install_name_tool -id @executable_path/../Frameworks/libusb-1.0.0.dylib \

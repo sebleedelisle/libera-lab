@@ -195,41 +195,49 @@ jobs:
           timestamp-rfc3161: http://timestamp.acs.microsoft.com
           timestamp-digest: SHA256
 
-      - name: Package (Linux)
+      - name: Package AppImage (Linux)
         if: runner.os == 'Linux'
         run: |
-          mkdir -p staging/libera-lab
-          cp build/libera-lab staging/libera-lab/
-          cp -r build/patterns staging/libera-lab/ || true
-          sed 's/^            //' > staging/libera-lab/README.txt <<'EOF'
-            Libera Lab (Linux)
-            ==================
+          sudo apt-get install -y imagemagick
 
-            To run:
-                ./libera-lab
+          # Extract a 256x256 PNG from the existing .ico (it already contains
+          # a PNG at index 0) so we don't need a separate source image.
+          convert 'icons/libera-lab.ico[0]' libera-lab.png
 
-            Required system library
-            -----------------------
-            Libera Lab needs libusb 1.0 installed on your system to talk to
-            laser DACs over USB. If you see an error like:
-
-                error while loading shared libraries: libusb-1.0.so.0:
-                cannot open shared object file: No such file or directory
-
-            install it with your package manager:
-
-                Debian / Ubuntu / Mint:   sudo apt install libusb-1.0-0
-                Fedora / RHEL:            sudo dnf install libusbx
-                Arch / Manjaro:           sudo pacman -S libusb
-
-            USB permissions
-            ---------------
-            On most distros, accessing USB devices as a normal user requires
-            a udev rule. If Libera Lab can't see your DAC, you may need to
-            add your user to the "plugdev" group or install a udev rule for
-            the device.
+          # The .desktop file tells Linux desktop environments how to launch
+          # and display the app. Exec/Icon names must match the files below.
+          # (sed strips the YAML indentation — .desktop keys must be flush-left.)
+          sed 's/^          //' > libera-lab.desktop <<'EOF'
+          [Desktop Entry]
+          Type=Application
+          Name=Libera Lab
+          Comment=Laser DAC control and testing
+          Exec=libera-lab
+          Icon=libera-lab
+          Categories=Graphics;AudioVideo;
+          Terminal=false
           EOF
-          tar -czf libera-lab-linux.tar.gz -C staging libera-lab
+
+          # linuxdeploy is the standard tool for turning a binary + metadata
+          # into an AppImage. It also auto-bundles the binary's shared library
+          # dependencies (incl. libusb) so end users need nothing preinstalled.
+          wget -q https://github.com/linuxdeploy/linuxdeploy/releases/download/continuous/linuxdeploy-x86_64.AppImage
+          chmod +x linuxdeploy-x86_64.AppImage
+          export APPIMAGE_EXTRACT_AND_RUN=1
+
+          # Populate AppDir (copies executable + ldd deps into AppDir/usr/lib).
+          ./linuxdeploy-x86_64.AppImage --appdir AppDir \
+            --executable build/libera-lab \
+            --desktop-file libera-lab.desktop \
+            --icon-file libera-lab.png
+
+          # ILDA patterns are loaded at runtime from ./patterns/ relative to
+          # the executable, so ship them next to it inside the AppDir.
+          cp -r build/patterns AppDir/usr/bin/ || true
+
+          # Produce the final single-file AppImage.
+          export OUTPUT=libera-lab-linux.AppImage
+          ./linuxdeploy-x86_64.AppImage --appdir AppDir --output appimage
 
       - name: Package (Windows)
         if: runner.os == 'Windows'
@@ -249,7 +257,7 @@ jobs:
           path: |
             ${{ matrix.artifact }}.dmg
             ${{ matrix.artifact }}.zip
-            ${{ matrix.artifact }}.tar.gz
+            ${{ matrix.artifact }}.AppImage
 
       # ---- Cleanup ----
 
@@ -273,7 +281,7 @@ jobs:
         with:
           files: |
             libera-lab-macos/libera-lab-macos.dmg
-            libera-lab-linux/libera-lab-linux.tar.gz
+            libera-lab-linux/libera-lab-linux.AppImage
             libera-lab-windows/libera-lab-windows.zip
           generate_release_notes: true
 
@@ -292,7 +300,7 @@ jobs:
           # Copy the artifacts into public/downloads/<version>/
           mkdir -p "public/downloads/${VERSION}"
           cp ../libera-lab-macos/libera-lab-macos.dmg "public/downloads/${VERSION}/" || true
-          cp ../libera-lab-linux/libera-lab-linux.tar.gz "public/downloads/${VERSION}/" || true
+          cp ../libera-lab-linux/libera-lab-linux.AppImage "public/downloads/${VERSION}/" || true
           cp ../libera-lab-windows/libera-lab-windows.zip "public/downloads/${VERSION}/" || true
 
           # Update releases.json — prepend the new release
@@ -304,7 +312,7 @@ jobs:
               'version': '${VERSION}',
               'date': '${DATE}',
               'macos': 'downloads/${VERSION}/libera-lab-macos.dmg',
-              'linux': 'downloads/${VERSION}/libera-lab-linux.tar.gz',
+              'linux': 'downloads/${VERSION}/libera-lab-linux.AppImage',
               'windows': 'downloads/${VERSION}/libera-lab-windows.zip'
           }
           releases = [r for r in releases if r['version'] != '${VERSION}']

@@ -7,29 +7,11 @@
 
 #include "libera.h"
 #include "libera/core/ThreadUtils.hpp"
+#include "LiberaApp.h"
 
 #include "imgui.h"
-#include "imgui_impl_glfw.h"
-#include "imgui_impl_opengl3.h"
 #include "fonts/IconsForkAwesome.h"
 #include "ILDAParser.h"
-
-// Compressed font data (linked from fonts/*.cpp)
-extern const unsigned int RobotoMedium_compressed_size;
-extern const unsigned int RobotoMedium_compressed_data[];
-extern const unsigned int RobotoBold_compressed_size;
-extern const unsigned int RobotoBold_compressed_data[];
-extern const unsigned int ForkAwesome_compressed_size;
-extern const unsigned int ForkAwesome_compressed_data[];
-
-#ifdef __APPLE__
-#define GL_SILENCE_DEPRECATION
-#include <OpenGL/gl.h>
-#else
-#include <GL/gl.h>
-#endif
-
-#include <GLFW/glfw3.h>
 
 #include <algorithm>
 #include <atomic>
@@ -1571,121 +1553,26 @@ static bool drawLogo(ImGuiIO& io, ImVec2 pos, float areaWidth,
 // ---------------------------------------------------------------------------
 
 int main(int /*argc*/, char* argv[]) {
-    if (!glfwInit()) {
-        std::fprintf(stderr, "Failed to initialise GLFW\n");
-        return 1;
-    }
-
-#ifdef __APPLE__
-    glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 3);
-    glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 2);
-    glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE);
-    glfwWindowHint(GLFW_OPENGL_FORWARD_COMPAT, GLFW_TRUE);
-    const char* glslVersion = "#version 150";
+    // Register user plugin directory (alongside the default bundled "plugins"
+    // next to the executable) before AppState constructs its System member.
+    {
+        std::string userPluginDir = getSettingsDir() + "/plugins";
+#ifdef _WIN32
+        CreateDirectoryA(userPluginDir.c_str(), nullptr);
 #else
-    glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 3);
-    glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 0);
-    const char* glslVersion = "#version 130";
+        mkdir(userPluginDir.c_str(), 0755);
 #endif
+        libera::System::addPluginDirectory(userPluginDir);
+    }
 
     // Load settings early so we can restore window geometry
     AppState state;
     loadSettings(state);
 
-    GLFWwindow* window = glfwCreateWindow(state.windowWidth, state.windowHeight, "Libera Lab v" APP_VERSION, nullptr, nullptr);
-    if (!window) { std::fprintf(stderr, "Failed to create window\n"); glfwTerminate(); return 1; }
-    if (state.windowX >= 0 && state.windowY >= 0)
-        glfwSetWindowPos(window, state.windowX, state.windowY);
-    glfwMakeContextCurrent(window);
-    glfwSwapInterval(1);
-
-    IMGUI_CHECKVERSION();
-    ImGui::CreateContext();
-    ImGuiIO& io = ImGui::GetIO();
-    io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard;
-    io.IniFilename = nullptr;
-
-    float xscale = 1.0f, yscale = 1.0f;
-    glfwGetWindowContentScale(window, &xscale, &yscale);
-    float dpiScale = xscale;
-
-    float baseFontSize = 16.0f * dpiScale, mediumFontSize = 20.0f * dpiScale, largeFontSize = 28.0f * dpiScale;
-    ImFontConfig fontConfig; fontConfig.OversampleH = 2; fontConfig.OversampleV = 2;
-    ImFontConfig mergeConfig; mergeConfig.MergeMode = true; mergeConfig.OversampleH = 2; mergeConfig.OversampleV = 2;
-    static const ImWchar iconRanges[] = { ICON_MIN_FK, ICON_MAX_FK, 0 };
-
-    io.Fonts->AddFontFromMemoryCompressedTTF(RobotoMedium_compressed_data, RobotoMedium_compressed_size, baseFontSize, &fontConfig);
-    mergeConfig.GlyphMinAdvanceX = baseFontSize;
-    io.Fonts->AddFontFromMemoryCompressedTTF(ForkAwesome_compressed_data, ForkAwesome_compressed_size, baseFontSize, &mergeConfig, iconRanges);
-    io.Fonts->AddFontFromMemoryCompressedTTF(RobotoBold_compressed_data, RobotoBold_compressed_size, mediumFontSize, &fontConfig);
-    mergeConfig.GlyphMinAdvanceX = mediumFontSize;
-    io.Fonts->AddFontFromMemoryCompressedTTF(ForkAwesome_compressed_data, ForkAwesome_compressed_size, mediumFontSize, &mergeConfig, iconRanges);
-    io.Fonts->AddFontFromMemoryCompressedTTF(RobotoBold_compressed_data, RobotoBold_compressed_size, largeFontSize, &fontConfig);
-    mergeConfig.GlyphMinAdvanceX = largeFontSize;
-    io.Fonts->AddFontFromMemoryCompressedTTF(ForkAwesome_compressed_data, ForkAwesome_compressed_size, largeFontSize, &mergeConfig, iconRanges);
-    io.Fonts->Build();
-    io.FontGlobalScale = 1.0f / dpiScale;
-
-    // ---- Style ----
-    ImGuiStyle& style = ImGui::GetStyle();
-    style.WindowRounding = 4.0f; style.WindowBorderSize = 0.0f; style.IndentSpacing = 0.0f;
-    style.WindowPadding = ImVec2(16.0f, 16.0f);
-    style.ItemSpacing = ImVec2(6.0f, 6.0f); style.ItemInnerSpacing = ImVec2(6.0f, 6.0f);
-    style.WindowMinSize = ImVec2(10.0f, 10.0f); style.FramePadding = ImVec2(8.0f, 6.0f);
-    style.FrameRounding = 2.0f; style.GrabRounding = 1.0f; style.GrabMinSize = 16.0f; style.PopupRounding = 8.0f;
-
-    ImVec4* colors = style.Colors;
-    colors[ImGuiCol_Text]                   = ImVec4(1.00f, 1.00f, 1.00f, 1.00f);
-    colors[ImGuiCol_TextDisabled]           = ImVec4(0.50f, 0.50f, 0.50f, 1.00f);
-    colors[ImGuiCol_WindowBg]               = ImVec4(0.0f, 0.0f, 0.0f, 0.94f);
-    colors[ImGuiCol_ChildBg]                = ImVec4(0.00f, 0.00f, 0.00f, 0.00f);
-    colors[ImGuiCol_PopupBg]                = ImVec4(0.0f, 0.0f, 0.0f, 1.0f);
-    colors[ImGuiCol_Border]                 = ImVec4(0.43f, 0.43f, 0.50f, 0.50f);
-    colors[ImGuiCol_BorderShadow]           = ImVec4(0.00f, 0.00f, 0.00f, 0.00f);
-    colors[ImGuiCol_FrameBg]                = ImVec4(0.16f, 0.29f, 0.48f, 0.4f);
-    colors[ImGuiCol_FrameBgHovered]         = ImVec4(0.26f, 0.59f, 0.98f, 0.40f);
-    colors[ImGuiCol_FrameBgActive]          = ImVec4(0.26f, 0.59f, 0.98f, 0.67f);
-    colors[ImGuiCol_TitleBg]                = ImVec4(24.0f/255.0f, 43.0f/255.0f, 72.0f/255.0f, 230.0f/255.0f);
-    colors[ImGuiCol_TitleBgActive]          = ImVec4(0.16f, 0.29f, 0.48f, 0.95f);
-    colors[ImGuiCol_TitleBgCollapsed]       = ImVec4(0.00f, 0.00f, 0.00f, 0.51f);
-    colors[ImGuiCol_MenuBarBg]              = ImVec4(0.14f, 0.14f, 0.14f, 1.00f);
-    colors[ImGuiCol_ScrollbarBg]            = ImVec4(0.02f, 0.02f, 0.02f, 0.53f);
-    colors[ImGuiCol_ScrollbarGrab]          = ImVec4(0.31f, 0.31f, 0.31f, 1.00f);
-    colors[ImGuiCol_ScrollbarGrabHovered]   = ImVec4(0.41f, 0.41f, 0.41f, 1.00f);
-    colors[ImGuiCol_ScrollbarGrabActive]    = ImVec4(0.51f, 0.51f, 0.51f, 1.00f);
-    colors[ImGuiCol_CheckMark]              = ImVec4(0.26f, 0.59f, 0.98f, 1.00f);
-    colors[ImGuiCol_SliderGrab]             = ImVec4(0.24f, 0.52f, 0.88f, 1.00f);
-    colors[ImGuiCol_SliderGrabActive]       = ImVec4(0.26f, 0.59f, 0.98f, 1.00f);
-    colors[ImGuiCol_Button]                 = ImVec4(0.26f, 0.59f, 0.98f, 0.40f);
-    colors[ImGuiCol_ButtonHovered]          = ImVec4(0.26f, 0.59f, 0.98f, 1.00f);
-    colors[ImGuiCol_ButtonActive]           = ImVec4(0.06f, 0.53f, 0.98f, 1.00f);
-    colors[ImGuiCol_Header]                 = ImVec4(0.26f, 0.59f, 0.98f, 0.31f);
-    colors[ImGuiCol_HeaderHovered]          = ImVec4(0.26f, 0.59f, 0.98f, 0.50f);
-    colors[ImGuiCol_HeaderActive]           = ImVec4(0.26f, 0.59f, 0.98f, 1.00f);
-    colors[ImGuiCol_Separator]              = ImVec4(0.43f, 0.43f, 0.50f, 0.10f);
-    colors[ImGuiCol_SeparatorHovered]       = ImVec4(0.10f, 0.40f, 0.75f, 0.78f);
-    colors[ImGuiCol_SeparatorActive]        = ImVec4(0.10f, 0.40f, 0.75f, 1.00f);
-    colors[ImGuiCol_ResizeGrip]             = ImVec4(0.26f, 0.59f, 0.98f, 0.20f);
-    colors[ImGuiCol_ResizeGripHovered]      = ImVec4(0.26f, 0.59f, 0.98f, 0.67f);
-    colors[ImGuiCol_ResizeGripActive]       = ImVec4(0.26f, 0.59f, 0.98f, 0.95f);
-    colors[ImGuiCol_PlotLines]              = ImVec4(0.61f, 0.61f, 0.61f, 1.00f);
-    colors[ImGuiCol_PlotLinesHovered]       = ImVec4(1.00f, 0.43f, 0.35f, 1.00f);
-    colors[ImGuiCol_PlotHistogram]          = ImVec4(0.90f, 0.70f, 0.00f, 1.00f);
-    colors[ImGuiCol_PlotHistogramHovered]   = ImVec4(1.00f, 0.60f, 0.00f, 1.00f);
-    colors[ImGuiCol_TableHeaderBg]          = ImVec4(0.19f, 0.19f, 0.20f, 1.00f);
-    colors[ImGuiCol_TableBorderStrong]      = ImVec4(0.31f, 0.31f, 0.35f, 1.00f);
-    colors[ImGuiCol_TableBorderLight]       = ImVec4(0.23f, 0.23f, 0.25f, 1.00f);
-    colors[ImGuiCol_TableRowBg]             = ImVec4(0.00f, 0.00f, 0.00f, 0.00f);
-    colors[ImGuiCol_TableRowBgAlt]          = ImVec4(1.00f, 1.00f, 1.00f, 0.06f);
-    colors[ImGuiCol_TextSelectedBg]         = ImVec4(0.26f, 0.59f, 0.98f, 0.35f);
-    colors[ImGuiCol_DragDropTarget]         = ImVec4(1.00f, 1.00f, 0.00f, 0.90f);
-    colors[ImGuiCol_NavHighlight]           = ImVec4(0.26f, 0.59f, 0.98f, 1.00f);
-    colors[ImGuiCol_NavWindowingHighlight]  = ImVec4(1.00f, 1.00f, 1.00f, 0.70f);
-    colors[ImGuiCol_NavWindowingDimBg]      = ImVec4(0.80f, 0.80f, 0.80f, 0.20f);
-    colors[ImGuiCol_ModalWindowDimBg]       = ImVec4(0.0f, 0.0f, 0.0f, 0.4f);
-
-    ImGui_ImplGlfw_InitForOpenGL(window, true);
-    ImGui_ImplOpenGL3_Init(glslVersion);
+    LiberaApp app;
+    if (!app.init({"Libera Lab v" APP_VERSION, state.windowWidth, state.windowHeight,
+                    state.windowX, state.windowY}))
+        return 1;
 
     // Load ILDA patterns from patterns/ folder next to executable
     loadILDAPatterns(state, getPatternsDir(argv[0]));
@@ -1693,16 +1580,14 @@ int main(int /*argc*/, char* argv[]) {
     state.discoveryRunning.store(true);
     state.discoveryThread = std::thread(discoveryThreadFunc, std::ref(state));
 
-    while (!glfwWindowShouldClose(window)) {
-        glfwPollEvents();
+    while (app.beginFrame()) {
         applyDiscoveryResults(state);
         pollAsyncConnections(state);
         updateFrameAndStats(state);
         sendFramesToControllers(state);
 
-        ImGui_ImplOpenGL3_NewFrame();
-        ImGui_ImplGlfw_NewFrame();
-        ImGui::NewFrame();
+        ImGuiIO& io = ImGui::GetIO();
+        ImVec4* colors = ImGui::GetStyle().Colors;
 
         // ---- Colour solo/toggle helper (used by keys and buttons) ----
         auto soloOrToggle = [&](bool* channel) {
@@ -2680,19 +2565,11 @@ int main(int /*argc*/, char* argv[]) {
 
         ImGui::End();
 
-        ImGui::Render();
-        int displayW, displayH;
-        glfwGetFramebufferSize(window, &displayW, &displayH);
-        glViewport(0, 0, displayW, displayH);
-        glClearColor(0.1f, 0.1f, 0.1f, 1.0f);
-        glClear(GL_COLOR_BUFFER_BIT);
-        ImGui_ImplOpenGL3_RenderDrawData(ImGui::GetDrawData());
-        glfwSwapBuffers(window);
+        app.endFrame();
     }
 
     // Capture window geometry before saving
-    glfwGetWindowSize(window, &state.windowWidth, &state.windowHeight);
-    glfwGetWindowPos(window, &state.windowX, &state.windowY);
+    app.getWindowGeometry(state.windowX, state.windowY, state.windowWidth, state.windowHeight);
     saveSettings(state);
 
     state.discoveryRunning.store(false);
@@ -2702,10 +2579,6 @@ int main(int /*argc*/, char* argv[]) {
     for (auto& entry : state.controllers) disconnectController(entry);
     state.liberaSystem.shutdown();
 
-    ImGui_ImplOpenGL3_Shutdown();
-    ImGui_ImplGlfw_Shutdown();
-    ImGui::DestroyContext();
-    glfwDestroyWindow(window);
-    glfwTerminate();
+    app.shutdown();
     return 0;
 }

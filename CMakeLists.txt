@@ -77,6 +77,7 @@ endif()
 # ---- Libera Lab executable ----
 add_executable(libera-lab
     ${CMAKE_CURRENT_SOURCE_DIR}/main.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/LiberaApp.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/ILDAParser.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/fonts/RobotoMedium.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/fonts/RobotoBold.cpp

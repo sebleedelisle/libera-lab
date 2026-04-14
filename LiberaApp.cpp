@@ -14,6 +14,8 @@
 #define GL_SILENCE_DEPRECATION
 #include <OpenGL/gl.h>
 #else
+#define WIN32_LEAN_AND_MEAN
+#include <windows.h>
 #include <GL/gl.h>
 #endif
 

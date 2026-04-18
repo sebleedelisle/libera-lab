@@ -80,6 +80,7 @@ add_executable(libera-lab
     ${CMAKE_CURRENT_SOURCE_DIR}/main.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/LiberaApp.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/LiberaPluginsWindow.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/OscilloscopeWindow.cpp
     $<$<PLATFORM_ID:Darwin>:${CMAKE_CURRENT_SOURCE_DIR}/LiberaFileDialog_macos.mm>
     $<$<NOT:$<PLATFORM_ID:Darwin>>:${CMAKE_CURRENT_SOURCE_DIR}/LiberaFileDialog_other.cpp>
     ${CMAKE_CURRENT_SOURCE_DIR}/ILDAParser.cpp

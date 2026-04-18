@@ -9,6 +9,7 @@
 #include "libera/core/ThreadUtils.hpp"
 #include "LiberaApp.h"
 #include "LiberaPluginsWindow.h"
+#include "OscilloscopeWindow.h"
 
 #include "imgui.h"
 #include "fonts/IconsForkAwesome.h"
@@ -2470,6 +2471,13 @@ int main(int /*argc*/, char* argv[]) {
         static bool showPluginsWindow = false;
         if (ImGui::Button(ICON_FK_PLUS_CIRCLE "  Plugins")) showPluginsWindow = true;
         libera::ui::DrawPluginsWindow(&showPluginsWindow, getSettingsDir() + "/plugins");
+        ImGui::SameLine();
+        static bool showOscilloscope = false;
+        static libera::ui::OscilloscopeState oscState;
+        if (ImGui::Button(ICON_FK_SIGNAL "  Scope")) showOscilloscope = true;
+        libera::ui::DrawOscilloscopeWindow(&showOscilloscope, oscState,
+            state.currentFrame.points, state.effectivePointRate(),
+            state.flipX, state.flipY, state.orientation);
 
         if (state.controllers.empty()) {
             ImGui::TextDisabled("Searching for controllers...");

@@ -1506,8 +1506,9 @@ static bool drawLogo(ImGuiIO& io, ImVec2 pos, float areaWidth,
     ImDrawList* drawList = overrideDl ? overrideDl : ImGui::GetWindowDrawList();
     ImFont* boldFont = io.Fonts->Fonts[2];
     ImFont* defaultFont = io.Fonts->Fonts[0];
-    float logoFontSize = boldFont->FontSize * io.FontGlobalScale;
-    float subFontSize = defaultFont->FontSize * io.FontGlobalScale * 0.85f;
+    float fontScale = ImGui::GetStyle().FontScaleMain;
+    float logoFontSize = boldFont->LegacySize * fontScale;
+    float subFontSize = defaultFont->LegacySize * fontScale * 0.85f;
 
     const char* t1 = "LIBERA";
     const char* t2 = "LAB";

@@ -70,6 +70,7 @@ bool LiberaApp::init(const LiberaAppConfig& config) {
     ImGui::CreateContext();
     ImGuiIO& io = ImGui::GetIO();
     io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard;
+    io.ConfigFlags |= ImGuiConfigFlags_ViewportsEnable;
     io.IniFilename = nullptr;
 
     // ---- DPI-aware fonts ----
@@ -111,10 +112,10 @@ bool LiberaApp::init(const LiberaAppConfig& config) {
         ForkAwesome_compressed_data, ForkAwesome_compressed_size, largeFontSize, &mergeConfig, iconRanges);
 
     io.Fonts->Build();
-    io.FontGlobalScale = 1.0f / dpiScale;
 
     // ---- Libera dark theme ----
     ImGuiStyle& style = ImGui::GetStyle();
+    style.FontScaleMain   = 1.0f / dpiScale;
     style.WindowRounding   = 4.0f;
     style.WindowBorderSize = 0.0f;
     style.IndentSpacing    = 0.0f;
@@ -178,6 +179,11 @@ bool LiberaApp::init(const LiberaAppConfig& config) {
     colors[ImGuiCol_NavWindowingDimBg]      = ImVec4(0.80f, 0.80f, 0.80f, 0.20f);
     colors[ImGuiCol_ModalWindowDimBg]       = ImVec4(0.0f, 0.0f, 0.0f, 0.4f);
 
+    if (io.ConfigFlags & ImGuiConfigFlags_ViewportsEnable) {
+        style.WindowRounding = 0.0f;
+        colors[ImGuiCol_WindowBg].w = 1.0f;
+    }
+
     // ---- Backends ----
     ImGui_ImplGlfw_InitForOpenGL(window, true);
     ImGui_ImplOpenGL3_Init(glslVersion);
@@ -214,6 +220,15 @@ void LiberaApp::endFrame() {
     glClearColor(0.1f, 0.1f, 0.1f, 1.0f);
     glClear(GL_COLOR_BUFFER_BIT);
     ImGui_ImplOpenGL3_RenderDrawData(ImGui::GetDrawData());
+
+    ImGuiIO& io = ImGui::GetIO();
+    if (io.ConfigFlags & ImGuiConfigFlags_ViewportsEnable) {
+        GLFWwindow* backupContext = glfwGetCurrentContext();
+        ImGui::UpdatePlatformWindows();
+        ImGui::RenderPlatformWindowsDefault();
+        glfwMakeContextCurrent(backupContext);
+    }
+
     glfwSwapBuffers(window);
 }
 

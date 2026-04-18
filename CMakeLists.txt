@@ -42,7 +42,7 @@ FetchContent_MakeAvailable(glfw)
 FetchContent_Declare(
     imgui
     GIT_REPOSITORY https://github.com/ocornut/imgui.git
-    GIT_TAG        v1.91.8
+    GIT_TAG        v1.92.7-docking
     GIT_SHALLOW    TRUE
 )
 FetchContent_MakeAvailable(imgui)

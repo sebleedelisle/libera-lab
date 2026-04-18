@@ -89,9 +89,11 @@ void DrawOscilloscopeWindow(bool* open,
     float availW = ImGui::GetContentRegionAvail().x;
     float availH = ImGui::GetContentRegionAvail().y;
     float labelW = 24.0f;
-    float plotW = availW - labelW - 4.0f;
-    float channelH = (availH - 4.0f * 4.0f) / 5.0f; // 5 channels, 4 gaps
+    float plotW = std::max(availW - labelW - 4.0f, 1.0f);
+    float rowGap = ImGui::GetStyle().ItemSpacing.y;
+    float channelH = (availH - rowGap * 4.0f) / 5.0f; // 5 rows, 4 inter-row gaps
     channelH = std::max(channelH, 30.0f);
+    float rowW = labelW + 4.0f + plotW;
 
     ImDrawList* drawList = ImGui::GetWindowDrawList();
     ImU32 bgCol = IM_COL32(20, 20, 20, 255);
@@ -99,15 +101,20 @@ void DrawOscilloscopeWindow(bool* open,
     ImU32 zeroCol = IM_COL32(80, 80, 80, 255);
 
     for (int ch = 0; ch < 5; ++ch) {
-        ImVec2 cursor = ImGui::GetCursorScreenPos();
+        ImVec2 rowMin = ImGui::GetCursorScreenPos();
+        char rowId[32];
+        std::snprintf(rowId, sizeof(rowId), "##scope_row_%d", ch);
+        ImGui::InvisibleButton(rowId, ImVec2(rowW, channelH));
 
-        // Label
-        ImGui::SetCursorScreenPos(cursor);
-        ImGui::TextColored(ImColor(channels[ch].colour).Value, "%s", channels[ch].label);
-
-        // Plot area
-        ImVec2 plotMin(cursor.x + labelW, cursor.y);
+        ImVec2 plotMin(rowMin.x + labelW, rowMin.y);
         ImVec2 plotMax(plotMin.x + plotW, plotMin.y + channelH);
+        ImVec2 labelPos(rowMin.x, rowMin.y + std::max(0.0f, (channelH - ImGui::GetFontSize()) * 0.5f));
+
+        drawList->AddText(ImGui::GetFont(),
+                          ImGui::GetFontSize(),
+                          labelPos,
+                          channels[ch].colour,
+                          channels[ch].label);
 
         // Background
         drawList->AddRectFilled(plotMin, plotMax, bgCol);
@@ -182,8 +189,6 @@ void DrawOscilloscopeWindow(bool* open,
 
         // Border
         drawList->AddRect(plotMin, plotMax, IM_COL32(80, 80, 80, 255));
-
-        ImGui::SetCursorScreenPos(ImVec2(cursor.x, plotMax.y + 4.0f));
     }
 
     ImGui::End();

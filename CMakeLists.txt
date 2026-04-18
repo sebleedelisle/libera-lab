@@ -66,6 +66,7 @@ target_link_libraries(imgui_lib PUBLIC glfw)
 # OpenGL
 if (APPLE)
     find_library(OPENGL_FRAMEWORK OpenGL REQUIRED)
+    find_library(APPKIT_FRAMEWORK AppKit REQUIRED)
     target_link_libraries(imgui_lib PUBLIC ${OPENGL_FRAMEWORK})
 elseif (WIN32)
     target_link_libraries(imgui_lib PUBLIC opengl32)
@@ -78,11 +79,18 @@ endif()
 add_executable(libera-lab
     ${CMAKE_CURRENT_SOURCE_DIR}/main.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/LiberaApp.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/LiberaPluginsWindow.cpp
+    $<$<PLATFORM_ID:Darwin>:${CMAKE_CURRENT_SOURCE_DIR}/LiberaFileDialog_macos.mm>
+    $<$<NOT:$<PLATFORM_ID:Darwin>>:${CMAKE_CURRENT_SOURCE_DIR}/LiberaFileDialog_other.cpp>
     ${CMAKE_CURRENT_SOURCE_DIR}/ILDAParser.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/fonts/RobotoMedium.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/fonts/RobotoBold.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/fonts/ForkAwesome.cpp
 )
+
+if (APPLE)
+    target_link_libraries(libera-lab PRIVATE ${APPKIT_FRAMEWORK})
+endif()
 
 # ---- macOS app bundle ----
 if (APPLE)

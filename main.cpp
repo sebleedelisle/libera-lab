@@ -8,6 +8,7 @@
 #include "libera.h"
 #include "libera/core/ThreadUtils.hpp"
 #include "LiberaApp.h"
+#include "LiberaPluginsWindow.h"
 
 #include "imgui.h"
 #include "fonts/IconsForkAwesome.h"
@@ -2465,6 +2466,10 @@ int main(int /*argc*/, char* argv[]) {
         ImGui::BeginChild("Controllers", ImVec2(previewSize, 0), ImGuiChildFlags_None);
 
         if (ImGui::Button("RESCAN")) { state.discoveryRequested.store(true); state.discoveryCv.notify_one(); }
+        ImGui::SameLine();
+        static bool showPluginsWindow = false;
+        if (ImGui::Button(ICON_FK_PLUS_CIRCLE "  Plugins")) showPluginsWindow = true;
+        libera::ui::DrawPluginsWindow(&showPluginsWindow, getSettingsDir() + "/plugins");
 
         if (state.controllers.empty()) {
             ImGui::TextDisabled("Searching for controllers...");

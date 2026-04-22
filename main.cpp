@@ -9,6 +9,7 @@
 #include "libera/core/ThreadUtils.hpp"
 #include "LiberaApp.h"
 #include "LiberaPluginsWindow.h"
+#include "LiberaFileDialog.h"
 #include "OscilloscopeWindow.h"
 
 #include "imgui.h"
@@ -20,6 +21,7 @@
 #include <chrono>
 #include <cmath>
 #include <cstdio>
+#include <filesystem>
 #include <fstream>
 #include <condition_variable>
 #include <future>
@@ -103,7 +105,9 @@ static const char* pointPatternNames[NUM_POINT_PATTERNS] = {
 struct ILDAPattern {
     std::string name;             // filename without extension
     std::string path;             // full path
-    std::vector<ILDAPoint> points; // first frame only
+    std::vector<std::vector<ILDAPoint>> frames; // all frames (single frame for static files)
+    float fps = 30.0f;            // playback frame rate for multi-frame files
+    bool builtin = false;         // true = bundled at startup, cannot be deleted from UI
 };
 
 struct ControllerEntry {
@@ -145,6 +149,12 @@ struct AppState {
     std::vector<ILDAPattern> ildaPatterns;
     int selectedIldaPattern = 0;
     bool singleColour = false;
+
+    // ILDA animation playback (for multi-frame files)
+    int ildaFrameIndex = 0;
+    bool ildaPlaying = true;
+    bool ildaLoop = true;
+    std::chrono::steady_clock::time_point ildaLastAdvance = std::chrono::steady_clock::now();
 
     // Window geometry (saved/restored)
     int windowWidth = 1020;
@@ -262,6 +272,21 @@ static void ensureSettingsDir() {
 #else
     mkdir(dir.c_str(), 0755);
 #endif
+}
+
+// User patterns live alongside settings, so they persist per-user across app
+// updates and don't collide with the bundled read-only patterns folder.
+// Windows: %APPDATA%\LiberaLab\patterns
+// macOS:   ~/Library/Application Support/LiberaLab/patterns
+// Linux:   $XDG_CONFIG_HOME/LiberaLab/patterns (or ~/.config/LiberaLab/patterns)
+static std::string getUserPatternsDir() {
+    return getSettingsDir() + "/patterns";
+}
+
+static void ensureUserPatternsDir() {
+    ensureSettingsDir();
+    std::error_code ec;
+    std::filesystem::create_directories(getUserPatternsDir(), ec);
 }
 
 static void saveSettings(const AppState& state) {
@@ -621,10 +646,9 @@ static std::string getPatternsDir(const char* argv0) {
     return dir + "/patterns";
 }
 
-static void loadILDAPatterns(AppState& state, const std::string& dir) {
-    state.ildaPatterns.clear();
-
-    // Scan directory for .ild files
+// Scan `dir` for .ild files and append to state.ildaPatterns.
+// Does NOT clear existing entries — call once per source directory.
+static void scanILDADir(AppState& state, const std::string& dir, bool builtin) {
 #ifdef _WIN32
     WIN32_FIND_DATAA fd;
     HANDLE hFind = FindFirstFileA((dir + "\\*.ild").c_str(), &fd);
@@ -632,7 +656,6 @@ static void loadILDAPatterns(AppState& state, const std::string& dir) {
     do {
         std::string filename = fd.cFileName;
 #else
-    // POSIX: use opendir
     auto* d = opendir(dir.c_str());
     if (!d) return;
     struct dirent* entry;
@@ -640,19 +663,22 @@ static void loadILDAPatterns(AppState& state, const std::string& dir) {
         std::string filename = entry->d_name;
         if (filename.size() < 4) continue;
         std::string ext = filename.substr(filename.size() - 4);
-        // Case-insensitive .ild check
         for (auto& c : ext) c = static_cast<char>(::tolower(c));
         if (ext != ".ild") continue;
 #endif
         std::string fullPath = dir + "/" + filename;
         auto frames = ILDAParser::load(fullPath);
         if (!frames.empty() && !frames[0].empty()) {
-            // Strip extension for display name
             std::string name = filename;
             auto dot = name.find_last_of('.');
             if (dot != std::string::npos) name = name.substr(0, dot);
 
-            state.ildaPatterns.push_back({name, fullPath, frames[0]});
+            ILDAPattern p;
+            p.name = std::move(name);
+            p.path = fullPath;
+            p.frames = std::move(frames);
+            p.builtin = builtin;
+            state.ildaPatterns.push_back(std::move(p));
         }
 #ifdef _WIN32
     } while (FindNextFileA(hFind, &fd));
@@ -661,10 +687,74 @@ static void loadILDAPatterns(AppState& state, const std::string& dir) {
     }
     closedir(d);
 #endif
+}
 
-    // Sort by name
+static void loadILDAPatterns(AppState& state, const std::string& bundledDir) {
+    state.ildaPatterns.clear();
+    scanILDADir(state, bundledDir, /*builtin=*/true);
+    scanILDADir(state, getUserPatternsDir(), /*builtin=*/false);
+
+    // Sort: built-ins first, then user patterns, each group alphabetically
     std::sort(state.ildaPatterns.begin(), state.ildaPatterns.end(),
-              [](const ILDAPattern& a, const ILDAPattern& b) { return a.name < b.name; });
+              [](const ILDAPattern& a, const ILDAPattern& b) {
+                  if (a.builtin != b.builtin) return a.builtin && !b.builtin;
+                  return a.name < b.name;
+              });
+}
+
+// Load a single .ild file at `srcPath`, copy it into the user patterns
+// directory (so it persists across launches), and append it to the pattern
+// list. Returns the index of the new pattern, or -1 on failure. If a pattern
+// with the same filename already exists, finds a unique "foo (2).ild" name.
+static int addILDAFile(AppState& state, const std::string& srcPath) {
+    namespace fs = std::filesystem;
+
+    // Parse first to validate before copying
+    auto frames = ILDAParser::load(srcPath);
+    if (frames.empty() || frames[0].empty()) return -1;
+
+    fs::path src(srcPath);
+    std::string stem = src.stem().string();
+    std::string ext = src.extension().string();
+    if (ext.empty()) ext = ".ild";
+
+    ensureUserPatternsDir();
+    fs::path destDir(getUserPatternsDir());
+    fs::path dest = destDir / (stem + ext);
+
+    // If a different file already occupies the target name, find a unique suffix
+    std::error_code ec;
+    int suffix = 2;
+    while (fs::exists(dest, ec) && !fs::equivalent(src, dest, ec)) {
+        dest = destDir / (stem + " (" + std::to_string(suffix++) + ")" + ext);
+    }
+
+    // Copy unless we're already pointing at the same file on disk
+    if (!fs::equivalent(src, dest, ec)) {
+        fs::copy_file(src, dest, fs::copy_options::overwrite_existing, ec);
+        if (ec) return -1;
+    }
+
+    std::string destStr = dest.string();
+    std::string finalName = dest.stem().string();
+
+    // If this exact copy is already in the list, just refresh its frames
+    for (std::size_t i = 0; i < state.ildaPatterns.size(); ++i) {
+        if (state.ildaPatterns[i].path == destStr) {
+            state.ildaPatterns[i].name = finalName;
+            state.ildaPatterns[i].frames = std::move(frames);
+            state.ildaPatterns[i].builtin = false;
+            return static_cast<int>(i);
+        }
+    }
+
+    ILDAPattern p;
+    p.name = std::move(finalName);
+    p.path = destStr;
+    p.frames = std::move(frames);
+    p.builtin = false;
+    state.ildaPatterns.push_back(std::move(p));
+    return static_cast<int>(state.ildaPatterns.size()) - 1;
 }
 
 // Convert ILDA points to a libera Frame, applying brightness/RGB and size/offset
@@ -1323,10 +1413,34 @@ static core::Frame buildCurrentFrame(AppState& state) {
         frame = makePointFrame(state.pointPatternIndex, cx, cy, sz, state.dutyCycle);
     } else if (state.outputMode == 2) {
         int idx = state.selectedIldaPattern;
-        if (idx >= 0 && idx < static_cast<int>(state.ildaPatterns.size()))
-            frame = makeILDAFrame(state.ildaPatterns[idx].points, sz * 0.8f, cx, cy);
-        else
+        if (idx >= 0 && idx < static_cast<int>(state.ildaPatterns.size())) {
+            const auto& pat = state.ildaPatterns[idx];
+            int frameCount = static_cast<int>(pat.frames.size());
+            if (frameCount > 1 && state.ildaPlaying && pat.fps > 0.0f) {
+                // Advance frame index based on elapsed wall-clock time
+                auto now = std::chrono::steady_clock::now();
+                float elapsed = std::chrono::duration<float>(
+                    now - state.ildaLastAdvance).count();
+                float frameDuration = 1.0f / pat.fps;
+                if (elapsed >= frameDuration) {
+                    int steps = static_cast<int>(elapsed / frameDuration);
+                    int next = state.ildaFrameIndex + steps;
+                    if (state.ildaLoop) {
+                        next %= frameCount;
+                    } else if (next >= frameCount) {
+                        next = frameCount - 1;
+                        state.ildaPlaying = false;
+                    }
+                    state.ildaFrameIndex = next;
+                    state.ildaLastAdvance = now;
+                }
+            }
+            if (state.ildaFrameIndex >= frameCount) state.ildaFrameIndex = 0;
+            if (state.ildaFrameIndex < 0) state.ildaFrameIndex = 0;
+            frame = makeILDAFrame(pat.frames[state.ildaFrameIndex], sz * 0.8f, cx, cy);
+        } else {
             frame = makeShapeFrame(0, sz, cx, cy); // fallback
+        }
     } else {
         frame = makeShapeFrame(state.patternIndex, sz, cx, cy);
     }
@@ -1968,18 +2082,51 @@ int main(int /*argc*/, char* argv[]) {
                         ImVec2(thumbPos.x + thumbSize, thumbPos.y + thumbSize),
                         borderCol, 2.0f, 0, borderThickness);
 
-                    drawILDAInRect(ildaDrawList, state.ildaPatterns[i].points,
-                                   thumbPos, ImVec2(thumbSize, thumbSize), false,
+                    const auto& pat = state.ildaPatterns[i];
+                    // For the currently selected multi-frame pattern, show the live frame;
+                    // otherwise show the first frame as a static thumbnail.
+                    int thumbFrameIdx = 0;
+                    if (selected && pat.frames.size() > 1 &&
+                        state.ildaFrameIndex >= 0 &&
+                        state.ildaFrameIndex < static_cast<int>(pat.frames.size())) {
+                        thumbFrameIdx = state.ildaFrameIndex;
+                    }
+                    drawILDAInRect(ildaDrawList, pat.frames[thumbFrameIdx],
+                                   thumbPos, ImVec2(thumbSize, thumbSize), true,
                                    selected ? 1.0f : 0.6f);
 
-                    // Label
-                    const char* name = state.ildaPatterns[i].name.c_str();
-                    ImVec2 labelSize = ImGui::CalcTextSize(name);
+                    // Animation badge: show frame count in corner if multi-frame
+                    if (pat.frames.size() > 1) {
+                        char badge[16];
+                        std::snprintf(badge, sizeof(badge), "%zu", pat.frames.size());
+                        ImVec2 badgeSize = ImGui::CalcTextSize(badge);
+                        ImVec2 badgePos(thumbPos.x + thumbSize - badgeSize.x - 6.0f,
+                                        thumbPos.y + 3.0f);
+                        ildaDrawList->AddRectFilled(
+                            ImVec2(badgePos.x - 3.0f, badgePos.y - 1.0f),
+                            ImVec2(badgePos.x + badgeSize.x + 3.0f, badgePos.y + badgeSize.y + 1.0f),
+                            IM_COL32(0, 0, 0, 180), 2.0f);
+                        ildaDrawList->AddText(badgePos, IM_COL32(255, 200, 80, 255), badge);
+                    }
+
+                    // Label — truncate with ellipsis if it won't fit under the thumbnail
+                    std::string shownName = pat.name;
+                    ImVec2 labelSize = ImGui::CalcTextSize(shownName.c_str());
+                    if (labelSize.x > thumbSize) {
+                        const std::string ell = "...";
+                        float ellW = ImGui::CalcTextSize(ell.c_str()).x;
+                        while (shownName.size() > 1 &&
+                               ImGui::CalcTextSize(shownName.c_str()).x + ellW > thumbSize) {
+                            shownName.pop_back();
+                        }
+                        shownName += ell;
+                        labelSize = ImGui::CalcTextSize(shownName.c_str());
+                    }
                     ildaDrawList->AddText(
                         ImVec2(thumbPos.x + std::max(0.0f, (thumbSize - labelSize.x) * 0.5f),
                                thumbPos.y + thumbSize + 2.0f),
                         selected ? IM_COL32(255, 255, 255, 255) : IM_COL32(150, 150, 150, 255),
-                        name);
+                        shownName.c_str());
 
                     ImGui::SetCursorScreenPos(thumbPos);
                     char btnId[32];
@@ -1987,8 +2134,13 @@ int main(int /*argc*/, char* argv[]) {
                     ImGui::PushStyleColor(ImGuiCol_Button, IM_COL32(0, 0, 0, 0));
                     ImGui::PushStyleColor(ImGuiCol_ButtonHovered, IM_COL32(255, 255, 255, 30));
                     ImGui::PushStyleColor(ImGuiCol_ButtonActive, IM_COL32(255, 255, 255, 50));
-                    if (ImGui::Button(btnId, ImVec2(thumbSize, thumbSize)))
-                        state.selectedIldaPattern = i;
+                    if (ImGui::Button(btnId, ImVec2(thumbSize, thumbSize))) {
+                        if (state.selectedIldaPattern != i) {
+                            state.selectedIldaPattern = i;
+                            state.ildaFrameIndex = 0;
+                            state.ildaLastAdvance = std::chrono::steady_clock::now();
+                        }
+                    }
                     ImGui::PopStyleColor(3);
 
                     int col = i % cols;
@@ -2000,20 +2152,88 @@ int main(int /*argc*/, char* argv[]) {
                             thumbPos.y + thumbSize + labelSize.y + 8.0f));
                     }
                 }
+            }
 
-                // Single colour toggle
-                ImGui::Spacing();
-                {
-                    bool wasOn = state.singleColour;
-                    if (wasOn) {
-                        ImGui::PushStyleColor(ImGuiCol_Button,       (ImVec4)ImColor(174, 84, 0));
-                        ImGui::PushStyleColor(ImGuiCol_ButtonHovered, (ImVec4)ImColor(206, 115, 0));
-                        ImGui::PushStyleColor(ImGuiCol_ButtonActive,  (ImVec4)ImColor(218, 145, 65));
+            // "Load ILDA file…" button — always available, even with no patterns loaded
+            ImGui::Spacing();
+            if (ImGui::Button("Load ILDA file...")) {
+                std::string picked = libera::ui::OpenFileDialog("Load ILDA file", {"ild", "ILD"});
+                if (!picked.empty()) {
+                    int newIdx = addILDAFile(state, picked);
+                    if (newIdx >= 0) {
+                        state.selectedIldaPattern = newIdx;
+                        state.ildaFrameIndex = 0;
+                        state.ildaLastAdvance = std::chrono::steady_clock::now();
                     }
-                    if (ImGui::Button("SINGLE COLOUR MODE"))
-                        state.singleColour = !state.singleColour;
-                    if (wasOn) ImGui::PopStyleColor(3);
                 }
+            }
+
+            // Delete button — only active when a user-loaded pattern is selected
+            ImGui::SameLine();
+            int selForDelete = state.selectedIldaPattern;
+            bool canDelete = (selForDelete >= 0 &&
+                              selForDelete < static_cast<int>(state.ildaPatterns.size()) &&
+                              !state.ildaPatterns[selForDelete].builtin);
+            ImGui::BeginDisabled(!canDelete);
+            if (ImGui::Button("Delete") && canDelete) {
+                // Only remove the file if it lives inside the user patterns dir
+                std::error_code ec;
+                std::filesystem::path filePath(state.ildaPatterns[selForDelete].path);
+                std::filesystem::path userDir(getUserPatternsDir());
+                auto rel = std::filesystem::relative(filePath, userDir, ec);
+                if (!ec && !rel.empty() &&
+                    rel.native().find("..") == std::string::npos) {
+                    std::filesystem::remove(filePath, ec);
+                }
+                state.ildaPatterns.erase(state.ildaPatterns.begin() + selForDelete);
+                if (state.selectedIldaPattern >= static_cast<int>(state.ildaPatterns.size()))
+                    state.selectedIldaPattern = static_cast<int>(state.ildaPatterns.size()) - 1;
+                if (state.selectedIldaPattern < 0) state.selectedIldaPattern = 0;
+                state.ildaFrameIndex = 0;
+                state.ildaLastAdvance = std::chrono::steady_clock::now();
+            }
+            ImGui::EndDisabled();
+
+            // Animation controls for multi-frame patterns
+            int selIdx = state.selectedIldaPattern;
+            if (selIdx >= 0 && selIdx < static_cast<int>(state.ildaPatterns.size())) {
+                auto& pat = state.ildaPatterns[selIdx];
+                int frameCount = static_cast<int>(pat.frames.size());
+                if (frameCount > 1) {
+                    ImGui::Spacing();
+                    ImGui::Text("Animation: %d frames", frameCount);
+                    if (ImGui::Button(state.ildaPlaying ? "Pause" : "Play")) {
+                        state.ildaPlaying = !state.ildaPlaying;
+                        state.ildaLastAdvance = std::chrono::steady_clock::now();
+                    }
+                    ImGui::SameLine();
+                    ImGui::Checkbox("Loop", &state.ildaLoop);
+                    ImGui::SameLine();
+                    ImGui::SetNextItemWidth(100.0f);
+                    ImGui::DragFloat("FPS", &pat.fps, 0.5f, 1.0f, 120.0f, "%.1f");
+                    // Scrubber
+                    int scrubFrame = state.ildaFrameIndex;
+                    ImGui::SetNextItemWidth(-1.0f);
+                    if (ImGui::SliderInt("##ildaScrub", &scrubFrame, 0, frameCount - 1,
+                                         "Frame %d")) {
+                        state.ildaFrameIndex = scrubFrame;
+                        state.ildaLastAdvance = std::chrono::steady_clock::now();
+                    }
+                }
+            }
+
+            // Single colour toggle
+            ImGui::Spacing();
+            {
+                bool wasOn = state.singleColour;
+                if (wasOn) {
+                    ImGui::PushStyleColor(ImGuiCol_Button,       (ImVec4)ImColor(174, 84, 0));
+                    ImGui::PushStyleColor(ImGuiCol_ButtonHovered, (ImVec4)ImColor(206, 115, 0));
+                    ImGui::PushStyleColor(ImGuiCol_ButtonActive,  (ImVec4)ImColor(218, 145, 65));
+                }
+                if (ImGui::Button("SINGLE COLOUR MODE"))
+                    state.singleColour = !state.singleColour;
+                if (wasOn) ImGui::PopStyleColor(3);
             }
         }
 

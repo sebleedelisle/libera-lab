@@ -2181,10 +2181,21 @@ int main(int /*argc*/, char* argv[]) {
                 std::filesystem::path filePath(state.ildaPatterns[selForDelete].path);
                 std::filesystem::path userDir(getUserPatternsDir());
                 auto rel = std::filesystem::relative(filePath, userDir, ec);
-                if (!ec && !rel.empty() &&
-                    rel.native().find("..") == std::string::npos) {
-                    std::filesystem::remove(filePath, ec);
+                // Reject any relative path that climbs above the user dir.
+                // .native() is wstring on Windows / string on POSIX, so compare
+                // path components directly instead of using string search.
+                bool escapesUserDir = false;
+                if (ec || rel.empty()) {
+                    escapesUserDir = true;
+                } else {
+                    for (const auto& part : rel) {
+                        if (part == std::filesystem::path("..")) {
+                            escapesUserDir = true;
+                            break;
+                        }
+                    }
                 }
+                if (!escapesUserDir) std::filesystem::remove(filePath, ec);
                 state.ildaPatterns.erase(state.ildaPatterns.begin() + selForDelete);
                 if (state.selectedIldaPattern >= static_cast<int>(state.ildaPatterns.size()))
                     state.selectedIldaPattern = static_cast<int>(state.ildaPatterns.size()) - 1;

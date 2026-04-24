@@ -6,10 +6,13 @@ patterns or ILDA files, manage controller plugins, and inspect output with live
 preview and scope tools.
 
 ## OMNIA LIBERA INTER SE
-### Any software. Any Laser.
+### Any software. Any laser.
 
-Libera Lab is part of the Libera series of apps and open source code, with the
-mission to improve interoperability between lasers and software.
+Libera Lab is part of the growing Libera ecosystem - interoperable tools
+designed to connect lasers and software without restriction.
+
+The laser industry has been held back by closed systems and vendor lock-in.
+Libera is built to break that cycle.
 
 ## Build
 

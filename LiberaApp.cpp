@@ -111,8 +111,6 @@ bool LiberaApp::init(const LiberaAppConfig& config) {
     io.Fonts->AddFontFromMemoryCompressedTTF(
         ForkAwesome_compressed_data, ForkAwesome_compressed_size, largeFontSize, &mergeConfig, iconRanges);
 
-    io.Fonts->Build();
-
     // ---- Libera dark theme ----
     ImGuiStyle& style = ImGui::GetStyle();
     style.FontScaleMain   = 1.0f / dpiScale;

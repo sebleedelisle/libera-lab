@@ -44,7 +44,12 @@
 build/
 build-*/
 cmake-build-*/
+CMakeUserPresets.json
 
 # OS / IDE
 .DS_Store
 imgui.ini
+.claude/
+.vscode/
+.idea/
+.vs/

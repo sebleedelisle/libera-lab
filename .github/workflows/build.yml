@@ -6,6 +6,7 @@ on:
     tags: ['v*']
   pull_request:
     branches: [main]
+  workflow_dispatch:
 
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
@@ -19,12 +20,21 @@ jobs:
           - os: macos-latest
             preset: release
             artifact: libera-lab-macos
+            pr_artifact_paths: |
+              build/libera-lab.app
+            package_path: libera-lab-macos.dmg
           - os: ubuntu-latest
             preset: linux-release
             artifact: libera-lab-linux
+            pr_artifact_paths: |
+              build/libera-lab
+            package_path: libera-lab-linux.AppImage
           - os: windows-latest
             preset: win-release
             artifact: libera-lab-windows
+            pr_artifact_paths: |
+              build/Release/libera-lab.exe
+            package_path: libera-lab-windows.zip
 
     runs-on: ${{ matrix.os }}
 
@@ -36,7 +46,13 @@ jobs:
 
       - name: Install dependencies (macOS)
         if: runner.os == 'macOS'
-        run: brew install ninja create-dmg 2>/dev/null
+        run: |
+          brew list ninja >/dev/null 2>&1 || brew install ninja
+
+      - name: Install packaging dependencies (macOS)
+        if: runner.os == 'macOS' && github.event_name != 'pull_request'
+        run: |
+          brew list create-dmg >/dev/null 2>&1 || brew install create-dmg
 
       - name: Install dependencies (Linux)
         if: runner.os == 'Linux'
@@ -51,18 +67,18 @@ jobs:
         run: cmake --preset ${{ matrix.preset }}
 
       - name: Build
-        run: cmake --build build --config Release
+        run: cmake --build build --config Release --parallel
 
       # ---- macOS code signing & notarization ----
 
       - name: Import Apple certificate
-        if: runner.os == 'macOS'
+        if: runner.os == 'macOS' && github.event_name != 'pull_request'
         env:
           APPLE_CERTIFICATE_P12: ${{ secrets.APPLE_CERTIFICATE_P12 }}
           APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
         run: |
           # Create a temporary keychain
-          KEYCHAIN_PATH=$RUNNER_TEMP/app-signing.keychain-db
+          KEYCHAIN_PATH="$RUNNER_TEMP/app-signing.keychain-db"
           KEYCHAIN_PASSWORD=$(openssl rand -hex 16)
 
           security create-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
@@ -70,8 +86,8 @@ jobs:
           security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
 
           # Import certificate
-          echo "$APPLE_CERTIFICATE_P12" | base64 --decode > $RUNNER_TEMP/certificate.p12
-          security import $RUNNER_TEMP/certificate.p12 \
+          echo "$APPLE_CERTIFICATE_P12" | base64 --decode > "$RUNNER_TEMP/certificate.p12"
+          security import "$RUNNER_TEMP/certificate.p12" \
             -k "$KEYCHAIN_PATH" \
             -P "$APPLE_CERTIFICATE_PASSWORD" \
             -T /usr/bin/codesign \
@@ -81,7 +97,7 @@ jobs:
           security list-keychains -d user -s "$KEYCHAIN_PATH" login.keychain-db
 
       - name: Bundle libusb into app (macOS)
-        if: runner.os == 'macOS'
+        if: runner.os == 'macOS' && github.event_name != 'pull_request'
         run: |
           # Find where libusb is linked from (the binary may contain duplicate
           # LC_LOAD_DYLIB entries — dedupe so we don't pass a multi-line string
@@ -117,7 +133,7 @@ jobs:
           otool -L build/libera-lab.app/Contents/MacOS/libera-lab | grep libusb
 
       - name: Sign app bundle
-        if: runner.os == 'macOS'
+        if: runner.os == 'macOS' && github.event_name != 'pull_request'
         run: |
           # Sign the bundled dylib first, then the app
           codesign --force --options runtime \
@@ -132,17 +148,17 @@ jobs:
           codesign --verify --verbose build/libera-lab.app
 
       - name: Notarize app
-        if: runner.os == 'macOS'
+        if: runner.os == 'macOS' && github.event_name != 'pull_request'
         env:
           APPLE_ID: ${{ secrets.APPLE_ID }}
           APPLE_APP_PASSWORD: ${{ secrets.APPLE_APP_PASSWORD }}
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
         run: |
           # Create a zip for notarization submission
-          ditto -c -k --keepParent build/libera-lab.app $RUNNER_TEMP/libera-lab-notarize.zip
+          ditto -c -k --keepParent build/libera-lab.app "$RUNNER_TEMP/libera-lab-notarize.zip"
 
           # Submit for notarization and wait
-          xcrun notarytool submit $RUNNER_TEMP/libera-lab-notarize.zip \
+          xcrun notarytool submit "$RUNNER_TEMP/libera-lab-notarize.zip" \
             --apple-id "$APPLE_ID" \
             --password "$APPLE_APP_PASSWORD" \
             --team-id "$APPLE_TEAM_ID" \
@@ -152,7 +168,7 @@ jobs:
           xcrun stapler staple build/libera-lab.app
 
       - name: Package DMG (macOS)
-        if: runner.os == 'macOS'
+        if: runner.os == 'macOS' && github.event_name != 'pull_request'
         run: |
           # Rename app bundle to have a nice display name in the DMG
           mv build/libera-lab.app "build/Libera Lab.app"
@@ -180,7 +196,7 @@ jobs:
       # ---- Windows code signing & packaging ----
 
       - name: Sign executable (Windows)
-        if: runner.os == 'Windows'
+        if: runner.os == 'Windows' && github.event_name != 'pull_request'
         uses: azure/trusted-signing-action@v0.5.0
         with:
           azure-tenant-id: ${{ vars.AZURE_TENANT_ID }}
@@ -196,7 +212,7 @@ jobs:
           timestamp-digest: SHA256
 
       - name: Package AppImage (Linux)
-        if: runner.os == 'Linux'
+        if: runner.os == 'Linux' && github.event_name != 'pull_request'
         run: |
           sudo apt-get install -y imagemagick
 
@@ -240,7 +256,7 @@ jobs:
           ./linuxdeploy-x86_64.AppImage --appdir AppDir --output appimage
 
       - name: Package (Windows)
-        if: runner.os == 'Windows'
+        if: runner.os == 'Windows' && github.event_name != 'pull_request'
         shell: bash
         run: |
           mkdir -p staging/libera-lab
@@ -250,20 +266,27 @@ jobs:
           cp libs/libera-core/libs/helios_dac/sdk/cpp/libusb_bin/Windows/x64/Release/dll/libusb-1.0.dll staging/libera-lab/ || true
           cd staging && 7z a ../libera-lab-windows.zip libera-lab
 
-      - name: Upload artifact
-        uses: actions/upload-artifact@v5
+      - name: Upload PR build artifact
+        if: github.event_name == 'pull_request'
+        uses: actions/upload-artifact@v7
+        with:
+          name: ${{ matrix.artifact }}-ci
+          if-no-files-found: error
+          path: ${{ matrix.pr_artifact_paths }}
+
+      - name: Upload packaged artifact
+        if: github.event_name != 'pull_request'
+        uses: actions/upload-artifact@v7
         with:
           name: ${{ matrix.artifact }}
-          path: |
-            ${{ matrix.artifact }}.dmg
-            ${{ matrix.artifact }}.zip
-            ${{ matrix.artifact }}.AppImage
+          if-no-files-found: error
+          path: ${{ matrix.package_path }}
 
       # ---- Cleanup ----
 
       - name: Cleanup keychain
-        if: runner.os == 'macOS' && always()
-        run: security delete-keychain $RUNNER_TEMP/app-signing.keychain-db || true
+        if: runner.os == 'macOS' && github.event_name != 'pull_request' && always()
+        run: security delete-keychain "$RUNNER_TEMP/app-signing.keychain-db" || true
 
   release:
     if: startsWith(github.ref, 'refs/tags/v')
@@ -274,10 +297,10 @@ jobs:
 
     steps:
       - name: Download artifacts
-        uses: actions/download-artifact@v5
+        uses: actions/download-artifact@v7
 
       - name: Create release
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3
         with:
           files: |
             libera-lab-macos/libera-lab-macos.dmg
@@ -291,10 +314,9 @@ jobs:
         run: |
           VERSION=${GITHUB_REF#refs/tags/}
           DATE=$(date -u +"%Y-%m-%d")
-          RELEASE_URL="https://github.com/sebleedelisle/libera-lab/releases/download/${VERSION}"
 
           # Clone the releases repo
-          git clone https://x-access-token:${RELEASES_PAT}@github.com/sebleedelisle/libera-lab-releases.git releases-repo
+          git clone "https://x-access-token:${RELEASES_PAT}@github.com/sebleedelisle/libera-lab-releases.git" releases-repo
           cd releases-repo
 
           # Copy the artifacts into public/downloads/<version>/

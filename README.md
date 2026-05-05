@@ -26,11 +26,10 @@ cmake --build --preset debug
 The build pulls GLFW and Dear ImGui at configure time and uses
 `libs/libera-core` for controller discovery and output.
 
-## License
+## Licensing
 
-Libera Lab is licensed under the MIT License. See [LICENSE](LICENSE).
+Unless otherwise noted, project-authored files in this repository are licensed
+under the GNU General Public License v3.0 (`LICENSE`).
 
-This repository also depends on code with its own licensing terms, especially
-inside `libs/libera-core` and its bundled third-party sources. See
-[THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) before redistributing
-submodule contents or packaged binaries.
+Third-party code keeps its own upstream licenses; see `LICENSING.md` and
+`THIRD_PARTY_NOTICES.md`.

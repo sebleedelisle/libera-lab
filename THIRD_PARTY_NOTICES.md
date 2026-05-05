@@ -1,8 +1,8 @@
 # Third-Party Notices
 
-This repository is MIT-licensed at the top level. That license applies to the
-source files in this repository unless a subdirectory or bundled dependency
-states otherwise.
+This repository is GPLv3-licensed at the top level. That license applies to
+project-authored files unless a subdirectory, bundled dependency, generated
+asset, or other file-specific notice states otherwise.
 
 Included third-party components keep their own licenses:
 
@@ -13,6 +13,8 @@ Included third-party components keep their own licenses:
   `libs/libera-core/libs/helios_dac/LICENSE.md` for the authoritative terms.
 - Build-time dependencies fetched by CMake, such as GLFW and Dear ImGui, remain
   under their respective upstream licenses.
+- Bundled/generated font files in `fonts/` and ILDA test patterns in
+  `patterns/` retain any applicable upstream or asset-specific terms.
 
 Before redistributing binaries or vendoring submodule contents, review the
 licenses shipped with those dependencies.

@@ -68,48 +68,30 @@ jobs:
         if: runner.os == 'Windows'
         uses: microsoft/setup-msbuild@v2
 
-      - name: Build libusb (Windows)
+      - name: Stage libusb (Windows)
         if: runner.os == 'Windows'
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
-          $archive = Join-Path $env:RUNNER_TEMP "libusb-$env:LIBUSB_VERSION.tar.bz2"
-          $sourceDir = Join-Path $env:RUNNER_TEMP "libusb-$env:LIBUSB_VERSION"
+          $archive = Join-Path $env:RUNNER_TEMP "libusb-$env:LIBUSB_VERSION.7z"
+          $extractDir = Join-Path $env:RUNNER_TEMP "libusb-$env:LIBUSB_VERSION-bin"
           $stageDir = Join-Path $env:GITHUB_WORKSPACE "build\libusb-msvc"
           $targetDir = Join-Path $stageDir "libusb_bin\Windows\x64\Release\dll"
 
           Invoke-WebRequest `
-            -Uri "https://github.com/libusb/libusb/releases/download/v$env:LIBUSB_VERSION/libusb-$env:LIBUSB_VERSION.tar.bz2" `
+            -Uri "https://github.com/libusb/libusb/releases/download/v$env:LIBUSB_VERSION/libusb-$env:LIBUSB_VERSION.7z" `
             -OutFile $archive
-          if (Test-Path $sourceDir) {
-            Remove-Item -Recurse -Force $sourceDir
+          if (Test-Path $extractDir) {
+            Remove-Item -Recurse -Force $extractDir
           }
-          tar -xjf $archive -C $env:RUNNER_TEMP
-
-          msbuild "$sourceDir\msvc\libusb_dll.vcxproj" `
-            /m `
-            /p:Configuration=Release `
-            /p:Platform=x64 `
-            /p:PlatformToolset=v143
-
-          $builtDll = Get-ChildItem -Path "$sourceDir\build" -Recurse -Filter "libusb-1.0.dll" |
-            Where-Object { $_.FullName -match '\\x64\\Release\\dll\\' } |
-            Select-Object -First 1
-          if (-not $builtDll) {
-            throw "Could not find built libusb-1.0.dll"
-          }
-
-          $builtDir = $builtDll.Directory.FullName
-          $builtPdb = Get-ChildItem -Path $builtDir -Filter "*.pdb" | Select-Object -First 1
-          if (-not $builtPdb) {
-            throw "Could not find built libusb PDB"
-          }
+          New-Item -ItemType Directory -Force $extractDir | Out-Null
+          7z x $archive "-o$extractDir" -y
 
           New-Item -ItemType Directory -Force $targetDir | Out-Null
-          Copy-Item "$sourceDir\libusb\libusb.h" $stageDir
-          Copy-Item "$builtDir\libusb-1.0.dll" $targetDir
-          Copy-Item "$builtDir\libusb-1.0.lib" $targetDir
-          Copy-Item $builtPdb.FullName (Join-Path $targetDir "libusb-1.0.pdb")
+          Copy-Item "$extractDir\include\libusb.h" $stageDir
+          Copy-Item "$extractDir\VS2022\MS64\dll\libusb-1.0.dll" $targetDir
+          Copy-Item "$extractDir\VS2022\MS64\dll\libusb-1.0.lib" $targetDir
+          Copy-Item "$extractDir\VS2022\MS64\dll\libusb-1.0.pdb" $targetDir
 
       - name: Configure
         shell: bash

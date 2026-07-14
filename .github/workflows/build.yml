@@ -30,7 +30,7 @@ jobs:
             pr_artifact_paths: |
               build/libera-lab
             package_path: libera-lab-linux.AppImage
-          - os: windows-latest
+          - os: windows-2022
             preset: win-release
             artifact: libera-lab-windows
             pr_artifact_paths: |

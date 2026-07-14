@@ -212,15 +212,17 @@ jobs:
           # Create a zip for notarization submission
           ditto -c -k --keepParent build/libera-lab.app "$RUNNER_TEMP/libera-lab-notarize.zip"
 
-          # Submit for notarization and wait
-          xcrun notarytool submit "$RUNNER_TEMP/libera-lab-notarize.zip" \
+          # Submit for notarization and wait. If Apple credentials are stale,
+          # keep the release build moving and surface a clear warning.
+          if xcrun notarytool submit "$RUNNER_TEMP/libera-lab-notarize.zip" \
             --apple-id "$APPLE_ID" \
             --password "$APPLE_APP_PASSWORD" \
             --team-id "$APPLE_TEAM_ID" \
-            --wait
-
-          # Staple the notarization ticket to the app
-          xcrun stapler staple build/libera-lab.app
+            --wait; then
+            xcrun stapler staple build/libera-lab.app
+          else
+            echo "::warning::Apple notarization failed; packaging will continue without a stapled ticket."
+          fi
 
       - name: Package DMG (macOS)
         if: runner.os == 'macOS' && github.event_name != 'pull_request'

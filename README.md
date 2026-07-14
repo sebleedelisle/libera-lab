@@ -5,6 +5,8 @@ previewing Libera-compatible laser controllers. It can stream generated test
 patterns or ILDA files, manage controller plugins, and inspect output with live
 preview and scope tools.
 
+![Libera Lab interface showing live laser preview, controller list, and output controls](docs/images/libera-lab-screenshot.png)
+
 ## OMNIA LIBERA INTER SE
 ### Any software. Any laser.
 

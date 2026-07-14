@@ -10,6 +10,7 @@ on:
 
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+  LIBUSB_VERSION: 1.0.30
 
 jobs:
   build:
@@ -63,8 +64,62 @@ jobs:
             libxcursor-dev libxi-dev libxkbcommon-dev \
             libwayland-dev wayland-protocols libdecor-0-dev
 
+      - name: Set up MSBuild (Windows)
+        if: runner.os == 'Windows'
+        uses: microsoft/setup-msbuild@v2
+
+      - name: Build libusb (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $archive = Join-Path $env:RUNNER_TEMP "libusb-$env:LIBUSB_VERSION.tar.bz2"
+          $sourceDir = Join-Path $env:RUNNER_TEMP "libusb-$env:LIBUSB_VERSION"
+          $stageDir = Join-Path $env:GITHUB_WORKSPACE "build\libusb-msvc"
+          $targetDir = Join-Path $stageDir "libusb_bin\Windows\x64\Release\dll"
+
+          Invoke-WebRequest `
+            -Uri "https://github.com/libusb/libusb/releases/download/v$env:LIBUSB_VERSION/libusb-$env:LIBUSB_VERSION.tar.bz2" `
+            -OutFile $archive
+          if (Test-Path $sourceDir) {
+            Remove-Item -Recurse -Force $sourceDir
+          }
+          tar -xjf $archive -C $env:RUNNER_TEMP
+
+          msbuild "$sourceDir\msvc\libusb_dll.vcxproj" `
+            /m `
+            /p:Configuration=Release `
+            /p:Platform=x64 `
+            /p:PlatformToolset=v143
+
+          $builtDll = Get-ChildItem -Path "$sourceDir\build" -Recurse -Filter "libusb-1.0.dll" |
+            Where-Object { $_.FullName -match '\\x64\\Release\\dll\\' } |
+            Select-Object -First 1
+          if (-not $builtDll) {
+            throw "Could not find built libusb-1.0.dll"
+          }
+
+          $builtDir = $builtDll.Directory.FullName
+          $builtPdb = Get-ChildItem -Path $builtDir -Filter "*.pdb" | Select-Object -First 1
+          if (-not $builtPdb) {
+            throw "Could not find built libusb PDB"
+          }
+
+          New-Item -ItemType Directory -Force $targetDir | Out-Null
+          Copy-Item "$sourceDir\libusb\libusb.h" $stageDir
+          Copy-Item "$builtDir\libusb-1.0.dll" $targetDir
+          Copy-Item "$builtDir\libusb-1.0.lib" $targetDir
+          Copy-Item $builtPdb.FullName (Join-Path $targetDir "libusb-1.0.pdb")
+
       - name: Configure
-        run: cmake --preset ${{ matrix.preset }}
+        shell: bash
+        run: |
+          extra_args=()
+          if [ "${{ runner.os }}" = "Windows" ]; then
+            workspace=$(pwd -W)
+            extra_args+=("-DLIBERA_BUNDLED_LIBUSB_DIR=${workspace}/build/libusb-msvc")
+          fi
+          cmake --preset ${{ matrix.preset }} "${extra_args[@]}"
 
       - name: Build
         run: cmake --build build --config Release --parallel
@@ -261,9 +316,16 @@ jobs:
         run: |
           mkdir -p staging/libera-lab
           cp build/Release/libera-lab.exe staging/libera-lab/
+          cp build/Release/libera-lab.pdb staging/libera-lab/ || true
           cp -r build/patterns staging/libera-lab/ || cp -r build/Release/patterns staging/libera-lab/ || true
-          # Bundle libusb DLL
-          cp libs/libera-core/libs/helios_dac/sdk/cpp/libusb_bin/Windows/x64/Release/dll/libusb-1.0.dll staging/libera-lab/ || true
+          # Bundle the MSVC-built libusb and symbols. Fall back to the
+          # vendored Helios SDK DLL only for non-CI/manual packaging.
+          LIBUSB_DLL_DIR="build/libusb-msvc/libusb_bin/Windows/x64/Release/dll"
+          if [ ! -f "${LIBUSB_DLL_DIR}/libusb-1.0.dll" ]; then
+            LIBUSB_DLL_DIR="libs/libera-core/libs/helios_dac/sdk/cpp/libusb_bin/Windows/x64/Release/dll"
+          fi
+          cp "${LIBUSB_DLL_DIR}/libusb-1.0.dll" staging/libera-lab/
+          cp "${LIBUSB_DLL_DIR}/libusb-1.0.pdb" staging/libera-lab/ || true
           cd staging && 7z a ../libera-lab-windows.zip libera-lab
 
       - name: Upload PR build artifact

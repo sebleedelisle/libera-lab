@@ -194,17 +194,17 @@ jobs:
           # Create a zip for notarization submission
           ditto -c -k --keepParent build/libera-lab.app "$RUNNER_TEMP/libera-lab-notarize.zip"
 
-          # Submit for notarization and wait. If Apple credentials are stale,
-          # keep the release build moving and surface a clear warning.
-          if xcrun notarytool submit "$RUNNER_TEMP/libera-lab-notarize.zip" \
+          # Submit for notarization and wait.
+          xcrun notarytool submit "$RUNNER_TEMP/libera-lab-notarize.zip" \
             --apple-id "$APPLE_ID" \
             --password "$APPLE_APP_PASSWORD" \
             --team-id "$APPLE_TEAM_ID" \
-            --wait; then
-            xcrun stapler staple build/libera-lab.app
-          else
-            echo "::warning::Apple notarization failed; packaging will continue without a stapled ticket."
-          fi
+            --wait
+
+          # Staple and verify the notarization ticket on the app.
+          xcrun stapler staple build/libera-lab.app
+          xcrun stapler validate build/libera-lab.app
+          spctl --assess --type execute --verbose=4 build/libera-lab.app
 
       - name: Package DMG (macOS)
         if: runner.os == 'macOS' && github.event_name != 'pull_request'
@@ -231,6 +231,25 @@ jobs:
           # Sign the DMG too
           codesign --force --sign "Developer ID Application: Seb Lee-Delisle (${{ secrets.APPLE_TEAM_ID }})" \
             libera-lab-macos.dmg
+          codesign --verify --verbose=4 libera-lab-macos.dmg
+
+      - name: Notarize DMG (macOS)
+        if: runner.os == 'macOS' && github.event_name != 'pull_request'
+        env:
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_APP_PASSWORD: ${{ secrets.APPLE_APP_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: |
+          # Notarize the final signed distribution container too.
+          xcrun notarytool submit libera-lab-macos.dmg \
+            --apple-id "$APPLE_ID" \
+            --password "$APPLE_APP_PASSWORD" \
+            --team-id "$APPLE_TEAM_ID" \
+            --wait
+
+          xcrun stapler staple libera-lab-macos.dmg
+          xcrun stapler validate libera-lab-macos.dmg
+          spctl --assess --type open --context context:primary-signature --verbose=4 libera-lab-macos.dmg
 
       # ---- Windows code signing & packaging ----
 

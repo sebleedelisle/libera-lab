@@ -80,6 +80,11 @@ else()
     target_link_libraries(imgui_lib PUBLIC OpenGL::GL)
 endif()
 
+include("${CMAKE_CURRENT_SOURCE_DIR}/libs/libera-core/cmake/LiberaImguiWidgets.cmake")
+if (NOT TARGET libera-plugin-ui-imgui)
+    libera_add_imgui_plugin_ui(libera-plugin-ui-imgui imgui_lib)
+endif()
+
 # ---- Libera Lab executable ----
 add_executable(libera-lab
     ${CMAKE_CURRENT_SOURCE_DIR}/main.cpp
@@ -138,7 +143,7 @@ else()
 endif()
 
 target_include_directories(libera-lab PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
-target_link_libraries(libera-lab PRIVATE libera-core imgui_lib)
+target_link_libraries(libera-lab PRIVATE libera-core imgui_lib libera-plugin-ui-imgui)
 target_compile_definitions(libera-lab PRIVATE APP_VERSION="${PROJECT_VERSION}")
 
 if (MSVC)

@@ -1670,18 +1670,6 @@ static bool drawLogo(ImGuiIO& io, ImVec2 pos, float areaWidth,
 // ---------------------------------------------------------------------------
 
 int main(int /*argc*/, char* argv[]) {
-    // Register user plugin directory (alongside the default bundled "plugins"
-    // next to the executable) before AppState constructs its System member.
-    {
-        std::string userPluginDir = getSettingsDir() + "/plugins";
-#ifdef _WIN32
-        CreateDirectoryA(userPluginDir.c_str(), nullptr);
-#else
-        mkdir(userPluginDir.c_str(), 0755);
-#endif
-        libera::System::addPluginDirectory(userPluginDir);
-    }
-
     // Load settings early so we can restore window geometry
     AppState state;
     loadSettings(state);
@@ -2702,7 +2690,7 @@ int main(int /*argc*/, char* argv[]) {
         ImGui::SameLine();
         static bool showPluginsWindow = false;
         if (ImGui::Button(ICON_FK_PLUS_CIRCLE "  Plugins")) showPluginsWindow = true;
-        libera::ui::DrawPluginsWindow(&showPluginsWindow, getSettingsDir() + "/plugins");
+        libera::ui::DrawPluginsWindow(&showPluginsWindow);
         ImGui::SameLine();
         static bool showOscilloscope = false;
         static libera::ui::OscilloscopeState oscState;

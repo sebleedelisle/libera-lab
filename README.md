@@ -28,6 +28,9 @@ cmake --build --preset debug
 The build pulls GLFW and Dear ImGui at configure time and uses
 `libs/libera-core` for controller discovery and output.
 
+Release builds are created by GitHub Actions from `v*` tags. See
+[CI and Release Setup](docs/ci-release.md).
+
 ## Licensing
 
 Unless otherwise noted, project-authored files in this repository are licensed

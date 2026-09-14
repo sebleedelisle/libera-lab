@@ -7,6 +7,7 @@
 
 #include "libera.h"
 #include "libera/core/ThreadUtils.hpp"
+#include "libera/gui/imgui/PluginManagementPanel.hpp"
 #include "LiberaApp.h"
 #include "LiberaPluginsWindow.h"
 #include "LiberaFileDialog.h"
@@ -120,6 +121,8 @@ struct ControllerEntry {
     bool connecting = false;
     std::shared_ptr<core::LaserController> controller;
     std::future<std::shared_ptr<core::LaserController>> connectFuture;
+    bool hasPluginSettings = false;
+    libera::gui::imgui::PluginPanelState pluginSettingsState;
 };
 
 struct DiscoveredInfo {
@@ -1380,7 +1383,16 @@ static void applyDiscoveryResults(AppState& state) {
         for (auto& entry : state.controllers) { if (entry.id == d.id) { exists = true; break; } }
         if (!exists) {
             bool shouldAutoConnect = state.savedEnabledControllers.count(d.id) > 0;
-            state.controllers.push_back({d.id, d.label, d.type, d.maxPointRate, d.usageState, shouldAutoConnect, false, nullptr, {}});
+            ControllerEntry entry;
+            entry.id = d.id;
+            entry.label = d.label;
+            entry.type = d.type;
+            entry.maxPointRate = d.maxPointRate;
+            entry.usageState = d.usageState;
+            entry.enabled = shouldAutoConnect;
+            entry.hasPluginSettings =
+                !plugin::controllerSettings(d.type, d.id).empty();
+            state.controllers.push_back(std::move(entry));
             if (shouldAutoConnect) startAsyncConnect(state, state.controllers.back());
         }
     }
@@ -2785,6 +2797,32 @@ int main(int /*argc*/, char* argv[]) {
                     startAsyncConnect(state, entry);
                 else if (!entry.enabled && wasEnabled)
                     disconnectController(entry);
+
+                if (entry.hasPluginSettings) {
+                    ImGui::Indent();
+                    if (ImGui::TreeNodeEx("Controller settings",
+                                          ImGuiTreeNodeFlags_SpanAvailWidth)) {
+                        libera::gui::imgui::DrawPluginControllerSettings(
+                            entry.type,
+                            entry.id,
+                            entry.pluginSettingsState);
+
+                        // Keep validation and plugin errors beside the setting
+                        // that produced them so they are immediately actionable.
+                        if (!entry.pluginSettingsState.lastMessage.empty()) {
+                            const ImVec4 messageColor =
+                                entry.pluginSettingsState.lastMessageIsError
+                                    ? ImVec4(1.0f, 0.35f, 0.35f, 1.0f)
+                                    : ImVec4(0.35f, 0.8f, 0.45f, 1.0f);
+                            ImGui::TextColored(
+                                messageColor,
+                                "%s",
+                                entry.pluginSettingsState.lastMessage.c_str());
+                        }
+                        ImGui::TreePop();
+                    }
+                    ImGui::Unindent();
+                }
 
                 ImGui::PopID();
             }

@@ -98,5 +98,9 @@ git push origin v1.2.1-private
   `libera-lab-windows.zip` for app code `LAB01`; Linux is still built and
   attached to GitHub Releases but is not imported by the server yet.
 - The workflow uses `fetch-depth: 0` so tags are available during CI.
+- macOS app signing applies the
+  `com.apple.security.cs.disable-library-validation` entitlement so the
+  hardened runtime can load explicitly user-installed unsigned controller
+  plugins. Gatekeeper and notarization checks for the host app remain enabled.
 - Pull requests do not receive signing secrets, so signing, notarization, and
   release packaging only run for non-PR events.

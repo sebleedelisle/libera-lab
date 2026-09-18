@@ -5,6 +5,7 @@
 #include "imgui.h"
 #include "libera/gui/imgui/PluginManagementPanel.hpp"
 #include "libera/plugin/PluginManagement.hpp"
+#include "libera/plugin/PluginPackage.hpp"
 
 #include <cstdlib>
 #include <optional>
@@ -30,7 +31,7 @@ libera::gui::imgui::PluginPanelState& pluginPanelState() {
 std::optional<std::string> choosePluginFile() {
     const std::string picked = OpenFileDialog(
         "Choose a Libera plugin to install",
-        {libera::plugin::platformPluginExtension()});
+        {libera::plugin::pluginPackageExtension()});
     if (picked.empty()) {
         return std::nullopt;
     }

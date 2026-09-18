@@ -179,6 +179,7 @@ jobs:
             build/libera-lab.app/Contents/Frameworks/libusb-1.0.0.dylib
 
           codesign --deep --force --options runtime \
+            --entitlements "$GITHUB_WORKSPACE/cmake/LiberaLab.entitlements" \
             --sign "Developer ID Application: Seb Lee-Delisle (${{ secrets.APPLE_TEAM_ID }})" \
             build/libera-lab.app
 

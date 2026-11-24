@@ -146,6 +146,22 @@ bool drawControllerDiscovery(std::set<std::string>& disabledControllerTypes,
     return changed;
 }
 
+// Draw the plugin-provided settings of one controller plus the result of the
+// last change.
+void drawControllerPluginSettings(const std::string& driverId,
+                                  const std::string& controllerId,
+                                  libera::gui::imgui::PluginPanelState& state) {
+    libera::gui::imgui::DrawPluginControllerSettings(driverId, controllerId, state);
+
+    // Keep validation and plugin errors beside the setting that produced them
+    // so they are immediately actionable.
+    if (!state.lastMessage.empty()) {
+        ImGui::TextColored(state.lastMessageIsError ? kErrorColor : kSuccessColor,
+                           "%s",
+                           state.lastMessage.c_str());
+    }
+}
+
 void drawControllerSettings(const std::vector<SettingsControllerItem>& controllers,
                             SettingsWindowState& state) {
     ImGui::Spacing();
@@ -163,7 +179,7 @@ void drawControllerSettings(const std::vector<SettingsControllerItem>& controlle
         ImGui::PushID(settingsKey.c_str());
         const std::string label = controller.label + " (" + controller.type + ")";
         if (ImGui::TreeNodeEx(label.c_str(), ImGuiTreeNodeFlags_SpanAvailWidth)) {
-            DrawControllerPluginSettings(
+            drawControllerPluginSettings(
                 controller.driverId,
                 controller.id,
                 state.controllerSettingsStates[settingsKey]);
@@ -179,20 +195,6 @@ void drawControllerSettings(const std::vector<SettingsControllerItem>& controlle
 }
 
 } // namespace
-
-void DrawControllerPluginSettings(const std::string& driverId,
-                                  const std::string& controllerId,
-                                  libera::gui::imgui::PluginPanelState& state) {
-    libera::gui::imgui::DrawPluginControllerSettings(driverId, controllerId, state);
-
-    // Keep validation and plugin errors beside the setting that produced them
-    // so they are immediately actionable.
-    if (!state.lastMessage.empty()) {
-        ImGui::TextColored(state.lastMessageIsError ? kErrorColor : kSuccessColor,
-                           "%s",
-                           state.lastMessage.c_str());
-    }
-}
 
 bool DrawSettingsWindow(bool* open,
                         std::set<std::string>& disabledControllerTypes,

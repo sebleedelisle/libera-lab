@@ -7,7 +7,6 @@
 
 #include "libera.h"
 #include "libera/core/ThreadUtils.hpp"
-#include "libera/gui/imgui/PluginManagementPanel.hpp"
 #include "LiberaApp.h"
 #include "LiberaPluginsWindow.h"
 #include "LiberaSettingsWindow.h"
@@ -125,8 +124,6 @@ struct ControllerEntry {
     bool connecting = false;
     std::shared_ptr<core::LaserController> controller;
     std::future<std::shared_ptr<core::LaserController>> connectFuture;
-    bool hasPluginSettings = false;
-    libera::gui::imgui::PluginPanelState pluginSettingsState;
 };
 
 struct DiscoveredInfo {
@@ -1403,8 +1400,6 @@ static void applyDiscoveryResults(AppState& state) {
             entry.maxPointRate = d.maxPointRate;
             entry.usageState = d.usageState;
             entry.enabled = shouldAutoConnect;
-            entry.hasPluginSettings =
-                !plugin::controllerSettings(d.driverId, d.id).empty();
             state.controllers.push_back(std::move(entry));
             if (shouldAutoConnect) startAsyncConnect(state, state.controllers.back());
         }
@@ -2878,19 +2873,6 @@ int main(int /*argc*/, char* argv[]) {
                     startAsyncConnect(state, entry);
                 else if (!entry.enabled && wasEnabled)
                     disconnectController(entry);
-
-                if (entry.hasPluginSettings) {
-                    ImGui::Indent();
-                    if (ImGui::TreeNodeEx("Controller settings",
-                                          ImGuiTreeNodeFlags_SpanAvailWidth)) {
-                        libera::ui::DrawControllerPluginSettings(
-                            entry.driverId,
-                            entry.id,
-                            entry.pluginSettingsState);
-                        ImGui::TreePop();
-                    }
-                    ImGui::Unindent();
-                }
 
                 ImGui::PopID();
             }

@@ -27,12 +27,6 @@ struct SettingsWindowState {
     std::string driverSelectionError;
 };
 
-// Draw the plugin-provided settings of one controller plus the result of the
-// last change. Shared by the settings window and the main controller list.
-void DrawControllerPluginSettings(const std::string& driverId,
-                                  const std::string& controllerId,
-                                  libera::gui::imgui::PluginPanelState& state);
-
 // Returns true when the discovery configuration changed (a controller type
 // was enabled/disabled or a different driver was selected). The caller must
 // then rebuild its libera::System, because managers are chosen at

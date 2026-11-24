@@ -24,7 +24,6 @@ struct SettingsWindowState {
     // Draft/edit state for plugin controller settings, keyed by driver + id.
     std::unordered_map<std::string, libera::gui::imgui::PluginPanelState>
         controllerSettingsStates;
-    std::string driverSelectionError;
 };
 
 // Returns true when the discovery configuration changed (a controller type

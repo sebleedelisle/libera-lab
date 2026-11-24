@@ -38,13 +38,10 @@ const core::ControllerManagerInfo* activeDriver(
     return nullptr;
 }
 
-bool drawControllerDiscovery(std::set<std::string>& disabledControllerTypes,
-                             SettingsWindowState& state) {
+bool drawControllerDiscovery(std::set<std::string>& disabledControllerTypes) {
     bool changed = false;
 
     ImGui::SeparatorText("Controller Discovery");
-    ImGui::TextDisabled(
-        "Choose which controller types Libera Lab searches for.");
 
     if (!disabledControllerTypes.empty()) {
         if (ImGui::Button(ICON_FK_CHECK "  Enable All")) {
@@ -119,14 +116,9 @@ bool drawControllerDiscovery(std::set<std::string>& disabledControllerTypes,
                 const std::string label = implementation.displayName +
                     (implementation.builtIn ? " (built-in)" : " (plugin)");
                 if (ImGui::Selectable(label.c_str(), isSelected) && !isSelected) {
-                    std::string error;
                     if (libera::plugin::selectControllerDriver(
-                            type, implementation.driverId, &error)) {
-                        state.driverSelectionError.clear();
+                            type, implementation.driverId)) {
                         changed = true;
-                    } else {
-                        state.driverSelectionError =
-                            "Could not select driver for " + type + ": " + error;
                     }
                 }
                 if (ImGui::IsItemHovered() && !implementation.description.empty()) {
@@ -137,10 +129,6 @@ bool drawControllerDiscovery(std::set<std::string>& disabledControllerTypes,
         }
 
         ImGui::PopID();
-    }
-
-    if (!state.driverSelectionError.empty()) {
-        ImGui::TextColored(kErrorColor, "%s", state.driverSelectionError.c_str());
     }
 
     return changed;
@@ -164,16 +152,18 @@ void drawControllerPluginSettings(const std::string& driverId,
 
 void drawControllerSettings(const std::vector<SettingsControllerItem>& controllers,
                             SettingsWindowState& state) {
-    ImGui::Spacing();
-    ImGui::SeparatorText("Plugin Controller Settings");
-
+    // The section only appears when a discovered controller has settings.
     bool any = false;
     for (const auto& controller : controllers) {
         if (libera::plugin::controllerSettings(controller.driverId, controller.id)
                 .empty()) {
             continue;
         }
-        any = true;
+        if (!any) {
+            ImGui::Spacing();
+            ImGui::SeparatorText("Plugin Controller Settings");
+            any = true;
+        }
 
         const std::string settingsKey = controller.driverId + "\n" + controller.id;
         ImGui::PushID(settingsKey.c_str());
@@ -186,11 +176,6 @@ void drawControllerSettings(const std::vector<SettingsControllerItem>& controlle
             ImGui::TreePop();
         }
         ImGui::PopID();
-    }
-
-    if (!any) {
-        ImGui::TextDisabled(
-            "None of the discovered controllers provide settings.");
     }
 }
 
@@ -207,7 +192,7 @@ bool DrawSettingsWindow(bool* open,
     bool changed = false;
     ImGui::SetNextWindowSize(ImVec2(620.0f, 500.0f), ImGuiCond_FirstUseEver);
     if (ImGui::Begin(ICON_FK_COG "  Settings", open, ImGuiWindowFlags_NoCollapse)) {
-        changed = drawControllerDiscovery(disabledControllerTypes, state);
+        changed = drawControllerDiscovery(disabledControllerTypes);
         drawControllerSettings(controllers, state);
     }
     ImGui::End();

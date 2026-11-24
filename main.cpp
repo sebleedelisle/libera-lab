@@ -7,9 +7,9 @@
 
 #include "libera.h"
 #include "libera/core/ThreadUtils.hpp"
-#include "libera/gui/imgui/PluginManagementPanel.hpp"
 #include "LiberaApp.h"
 #include "LiberaPluginsWindow.h"
+#include "LiberaSettingsWindow.h"
 #include "LiberaFileDialog.h"
 #include "OscilloscopeWindow.h"
 
@@ -115,20 +115,22 @@ struct ControllerEntry {
     std::string id;
     std::string label;
     std::string type;
+    // Identifies the exact manager (built-in or plugin) that discovered this
+    // controller; plugin settings are addressed by driver, not by type.
+    std::string driverId;
     std::uint32_t maxPointRate = 0;
     core::ControllerUsageState usageState = core::ControllerUsageState::Unknown;
     bool enabled = false;
     bool connecting = false;
     std::shared_ptr<core::LaserController> controller;
     std::future<std::shared_ptr<core::LaserController>> connectFuture;
-    bool hasPluginSettings = false;
-    libera::gui::imgui::PluginPanelState pluginSettingsState;
 };
 
 struct DiscoveredInfo {
     std::string id;
     std::string label;
     std::string type;
+    std::string driverId;
     std::uint32_t maxPointRate = 0;
     core::ControllerUsageState usageState = core::ControllerUsageState::Unknown;
 };
@@ -186,7 +188,11 @@ struct AppState {
 
     std::set<std::string> savedEnabledControllers;
 
-    System liberaSystem;
+    // Controller types the user switched off in Settings. System picks its
+    // managers at construction, so changing this means rebuilding the System.
+    std::set<std::string> disabledControllerTypes;
+
+    std::unique_ptr<System> liberaSystem;
     std::vector<ControllerEntry> controllers;
     std::thread discoveryThread;
     std::atomic<bool> discoveryRunning{false};
@@ -330,6 +336,8 @@ static void saveSettings(const AppState& state) {
         if (entry.enabled)
             f << "enabledController=" << entry.id << "\n";
     }
+    for (auto& type : state.disabledControllerTypes)
+        f << "disabledControllerType=" << type << "\n";
 }
 
 static void loadSettings(AppState& state) {
@@ -372,6 +380,7 @@ static void loadSettings(AppState& state) {
         else if (key == "windowX") state.windowX = std::stoi(val);
         else if (key == "windowY") state.windowY = std::stoi(val);
         else if (key == "enabledController") state.savedEnabledControllers.insert(val);
+        else if (key == "disabledControllerType") state.disabledControllerTypes.insert(val);
     }
 }
 
@@ -1338,12 +1347,12 @@ static void drawPreview(AppState& state, ImVec2 pos, ImVec2 size) {
 
 static void discoveryThreadFunc(AppState& state) {
     while (state.discoveryRunning.load()) {
-        auto discovered = state.liberaSystem.discoverControllers();
+        auto discovered = state.liberaSystem->discoverControllers();
         {
             std::lock_guard<std::mutex> lock(state.discoveredMutex);
             state.latestDiscovered.clear();
             for (auto& d : discovered)
-                state.latestDiscovered.push_back({d->idValue(), d->labelValue(), d->type(), d->maxPointRate(), d->usageState()});
+                state.latestDiscovered.push_back({d->idValue(), d->labelValue(), d->type(), d->driverId(), d->maxPointRate(), d->usageState()});
             state.discoveryResultReady.store(true);
         }
         {
@@ -1387,11 +1396,10 @@ static void applyDiscoveryResults(AppState& state) {
             entry.id = d.id;
             entry.label = d.label;
             entry.type = d.type;
+            entry.driverId = d.driverId;
             entry.maxPointRate = d.maxPointRate;
             entry.usageState = d.usageState;
             entry.enabled = shouldAutoConnect;
-            entry.hasPluginSettings =
-                !plugin::controllerSettings(d.type, d.id).empty();
             state.controllers.push_back(std::move(entry));
             if (shouldAutoConnect) startAsyncConnect(state, state.controllers.back());
         }
@@ -1535,7 +1543,7 @@ static void sendFramesToControllers(AppState& state) {
 static void startAsyncConnect(AppState& state, ControllerEntry& entry) {
     entry.connecting = true;
     std::string entryId = entry.id;
-    System* sys = &state.liberaSystem;
+    System* sys = state.liberaSystem.get();
     entry.connectFuture = std::async(std::launch::async, [sys, entryId]() -> std::shared_ptr<core::LaserController> {
         auto discovered = sys->discoverControllers();
         for (auto& d : discovered) {
@@ -1548,6 +1556,59 @@ static void startAsyncConnect(AppState& state, ControllerEntry& entry) {
 static void disconnectController(ControllerEntry& entry) {
     if (entry.controller) { entry.controller->setArmed(false); entry.controller.reset(); }
     entry.connecting = false;
+}
+
+// ---------------------------------------------------------------------------
+// Libera System lifecycle
+// ---------------------------------------------------------------------------
+
+static void startLiberaSystem(AppState& state) {
+    SystemOptions options;
+    options.disabledControllerTypes = state.disabledControllerTypes;
+    state.liberaSystem = std::make_unique<System>(std::move(options));
+
+    state.discoveryFinished.store(false);
+    state.discoveryRequested.store(false);
+    state.discoveryRunning.store(true);
+    state.discoveryThread = std::thread(discoveryThreadFunc, std::ref(state));
+}
+
+static void stopLiberaSystem(AppState& state) {
+    state.discoveryRunning.store(false);
+    state.discoveryCv.notify_one();
+    libera::core::timedJoin(state.discoveryThread, state.discoveryFinished,
+                            std::chrono::milliseconds(3000), "discoveryThread");
+    for (auto& entry : state.controllers) {
+        // In-flight connects hold a raw System pointer, so let them finish
+        // before the System goes away.
+        if (entry.connectFuture.valid()) entry.controller = entry.connectFuture.get();
+        disconnectController(entry);
+    }
+    if (state.liberaSystem) state.liberaSystem->shutdown();
+}
+
+// Apply changed discovery options (enabled controller types, selected
+// drivers). Managers are chosen when System is constructed, so tear the
+// current one down and start again; previously enabled controllers reconnect
+// once they are rediscovered.
+static void restartLiberaSystem(AppState& state) {
+    // Never resume laser output on freshly reconnected hardware by surprise.
+    state.armed = false;
+
+    std::set<std::string> enabledControllers;
+    for (auto& entry : state.controllers) {
+        if (entry.enabled) enabledControllers.insert(entry.id);
+    }
+
+    stopLiberaSystem(state);
+    state.controllers.clear();
+    state.savedEnabledControllers = std::move(enabledControllers);
+    {
+        std::lock_guard<std::mutex> lock(state.discoveredMutex);
+        state.latestDiscovered.clear();
+        state.discoveryResultReady.store(false);
+    }
+    startLiberaSystem(state);
 }
 
 // ---------------------------------------------------------------------------
@@ -1694,8 +1755,7 @@ int main(int /*argc*/, char* argv[]) {
     // Load ILDA patterns from patterns/ folder next to executable
     loadILDAPatterns(state, getPatternsDir(argv[0]));
 
-    state.discoveryRunning.store(true);
-    state.discoveryThread = std::thread(discoveryThreadFunc, std::ref(state));
+    startLiberaSystem(state);
 
     while (app.beginFrame()) {
         applyDiscoveryResults(state);
@@ -2704,6 +2764,22 @@ int main(int /*argc*/, char* argv[]) {
         if (ImGui::Button(ICON_FK_PLUS_CIRCLE "  Plugins")) showPluginsWindow = true;
         libera::ui::DrawPluginsWindow(&showPluginsWindow);
         ImGui::SameLine();
+        static bool showSettingsWindow = false;
+        static libera::ui::SettingsWindowState settingsWindowState;
+        if (ImGui::Button(ICON_FK_COG "  Settings")) showSettingsWindow = true;
+        {
+            std::vector<libera::ui::SettingsControllerItem> settingsControllers;
+            if (showSettingsWindow) {
+                for (auto& entry : state.controllers)
+                    settingsControllers.push_back({entry.driverId, entry.id, entry.label, entry.type});
+            }
+            if (libera::ui::DrawSettingsWindow(&showSettingsWindow, state.disabledControllerTypes,
+                                               settingsControllers, settingsWindowState)) {
+                saveSettings(state);
+                restartLiberaSystem(state);
+            }
+        }
+        ImGui::SameLine();
         static bool showOscilloscope = false;
         static libera::ui::OscilloscopeState oscState;
         if (ImGui::Button(ICON_FK_SIGNAL "  Scope")) showOscilloscope = true;
@@ -2798,32 +2874,6 @@ int main(int /*argc*/, char* argv[]) {
                 else if (!entry.enabled && wasEnabled)
                     disconnectController(entry);
 
-                if (entry.hasPluginSettings) {
-                    ImGui::Indent();
-                    if (ImGui::TreeNodeEx("Controller settings",
-                                          ImGuiTreeNodeFlags_SpanAvailWidth)) {
-                        libera::gui::imgui::DrawPluginControllerSettings(
-                            entry.type,
-                            entry.id,
-                            entry.pluginSettingsState);
-
-                        // Keep validation and plugin errors beside the setting
-                        // that produced them so they are immediately actionable.
-                        if (!entry.pluginSettingsState.lastMessage.empty()) {
-                            const ImVec4 messageColor =
-                                entry.pluginSettingsState.lastMessageIsError
-                                    ? ImVec4(1.0f, 0.35f, 0.35f, 1.0f)
-                                    : ImVec4(0.35f, 0.8f, 0.45f, 1.0f);
-                            ImGui::TextColored(
-                                messageColor,
-                                "%s",
-                                entry.pluginSettingsState.lastMessage.c_str());
-                        }
-                        ImGui::TreePop();
-                    }
-                    ImGui::Unindent();
-                }
-
                 ImGui::PopID();
             }
         }
@@ -2843,12 +2893,7 @@ int main(int /*argc*/, char* argv[]) {
     app.getWindowGeometry(state.windowX, state.windowY, state.windowWidth, state.windowHeight);
     saveSettings(state);
 
-    state.discoveryRunning.store(false);
-    state.discoveryCv.notify_one();
-    libera::core::timedJoin(state.discoveryThread, state.discoveryFinished,
-                            std::chrono::milliseconds(3000), "discoveryThread");
-    for (auto& entry : state.controllers) disconnectController(entry);
-    state.liberaSystem.shutdown();
+    stopLiberaSystem(state);
 
     app.shutdown();
     return 0;
